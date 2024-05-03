@@ -1,0 +1,522 @@
+
+Завантажуємо бібліотеки (розкоментувати тільки при першому запуску)
+```{r}
+#install.packages("dplyr") # для оператора %>%
+#install.packages("tidyr") # для drop_na
+#install.packages("ggplot2") # для візуалізації
+# install.packages("cowplot") # для об'єднання графіків в один
+# install.packages("reshape2") # для форматування таблиць
+```
+
+Підключаємо бібліотеки
+```{r}
+library(dplyr)
+library(tidyr) 
+library(ggplot2)
+library(cowplot)
+library(reshape2)
+
+```
+
+
+Загальні налаштування
+```{r}
+# Тема для графіків
+theme_set(theme_minimal())
+
+label_size = 15     # axis labels
+subTitle_size = 20  # subtitle and axis title
+title_size = 25     # main title
+
+```
+
+
+Завантажимо наш датасет
+```{r}
+hos_df = read.csv('Hospital_Inpatient_Discharges__SPARCS_De-Identified___2015.csv', 
+                  na.strings = c("", "Na", "NA", "NULL", "Nan"))
+# na.string() замінює рядкове 'пусте' значення на Na значеня у мові R
+print('Датасет успішно завантажено')
+```
+
+
+Перевіримо назви і типи даних колонок нашого датасету
+```{r}
+str(hos_df, give.attr = FALSE)
+```
+
+
+Переглянемо перші 5 записів нашого датасету
+```{r}
+head(hos_df, 5)
+```
+
+
+Переглянемо останні 5 записів нашого датасету
+```{r}
+tail(hos_df, 5)
+```
+
+
+Перевіримо унікальні значеня першого стовпця
+(Очікуємо побачити Na, це буде означати, що заміна відбулась коректно)
+```{r}
+unique(hos_df$Health.Service.Area)
+```
+
+
+Перевіримо, скільки Na значень у кожного стовпця
+```{r}
+sapply(hos_df, function(x) sum(is.na(x)))
+```
+
+Як бачимо, Na значень багато
+Переглянемо назви колонок (Копіював для вставки у код для видалення колонок)
+```{r}
+colnames(hos_df)
+```
+
+
+Видалимо 'Номер ліцензії іншого постачальника', оскільки майже 2/3 цих рядків мають значення Na.
+Також видалимо інші стовпці зі значною кількістю Na, оскільки з них буде важко отримати значення
+```{r}
+df = hos_df[,!names(hos_df) %in% c('Other.Provider.License.Number',
+                                   'Payment.Typology.2',
+                                   'Payment.Typology.3',
+                                   'Operating.Provider.License.Number')]
+```
+
+
+Але в нас ще лишились Na значення у таких колонках: Health.Service.Area = 2911 Na
+                                                    Hospital.County = 2911 Na
+                                                    Operating.Certificate.Number = 2911 Na
+                                                    Facility.Id = 2911 Na
+                                                    Zip.Code...3.digits = 4427 Na
+                                                    APR.Severity.of.Illness.Description = 112 Na
+                                                    APR.Risk.of.Mortality = 112 Na
+                                                    Attending.Provider.License.Number = 2911 Na
+                                                     
+Оскільки кількість Na значень відносно невелика, то ми можемо їх видалити
+```{r}
+df <- df %>% drop_na()
+```
+
+
+Перевіримо скільки наш датасет містить у собі Na значень
+(Очікуємо 0)
+```{r}
+sum(is.na(df))
+```
+
+
+Перевіримо кількість пацієнтів з невизначеною статю
+```{r}
+countGender <- df %>% group_by(Gender) %>% count()
+print(countGender[countGender$Gender=='U',])
+rm(countGender)
+```
+
+
+Оскільки таких рядків всього 39, можемо видалити їх
+```{r}
+df <- df[!df$Gender=="U",]
+```
+
+
+Приведення до numeric колокти Length.of.Stay , Total.Charges , Total.Costs
+```{r}
+
+# Якщо пацієнт лежав в лікарні більше 120 днів, запишемо їх значення перебування як 121
+df["Length.of.Stay"][df["Length.of.Stay"] == "120 +"] <- "121"
+df <- transform(df, Length.of.Stay = as.numeric(Length.of.Stay))
+
+# Перетворюємо ціну у числовий формат
+df$Total.Charges <- as.numeric(gsub("\\$", "", df$Total.Charges))
+df$Total.Costs <- as.numeric(gsub("\\$", "", df$Total.Costs))
+
+```
+
+Для адекватного розрахунку характеристик колонки Birth.Weight замінимо значення 0 на NA. Ці значення не видалятимемо, бо вони є абсолютно адекватними для випадків, що не є пологами.
+
+```{r}
+df$Birth.Weight <- ifelse(df$Birth.Weight == 0, NA, df$Birth.Weight)
+```
+
+
+
+Переглянемо детальніше інформацію про колонки
+```{r}
+summary(df)
+```
+
+
+Знову переглянемо характеристики вже очищеного датасету
+```{r}
+str(df, give.attr = FALSE)
+```
+
+
+Кругові графіки розподілу за статтю, расою та віком
+```{r}
+# Обчислимо відсотки
+countGender <- df %>% group_by(Gender) %>% summarise(totalCount=n()/nrow(df),
+            .groups = 'drop')
+# Обчислимо кумулятивні відсотки (значення верху кожного прямокутника)
+countGender$ymax <- cumsum(countGender$totalCount)
+
+# Обчислимо ніжні значення кожного прямокутника
+countGender$ymin <- c(0, head(countGender$ymax, n=-1))
+
+
+# Обчислимо розміщення підписів
+countGender$labelPosition <- (countGender$ymax + countGender$ymin) / 2
+
+# РОзрахуємо заголовки
+countGender$label <- paste0(countGender$Gender, "\n", 
+                                round(countGender$totalCount*100, 3), "%")
+
+# Створюємо графік
+plotCountGender <- ggplot(countGender, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Gender)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=4) +
+  scale_fill_brewer(palette=8) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+
+countAgeGroup <- df %>% group_by(Age.Group) %>% summarise(totalCount=n()/nrow(df),
+            .groups = 'drop')
+countAgeGroup$ymax <- cumsum(countAgeGroup$totalCount)
+countAgeGroup$ymin <- c(0, head(countAgeGroup$ymax, n=-1))
+countAgeGroup$labelPosition <- (countAgeGroup$ymax + countAgeGroup$ymin) / 2
+countAgeGroup$label <- paste0(countAgeGroup$Age.Group, "\n", 
+                                round(countAgeGroup$totalCount*100, 3), "%")
+
+plotCountAgeGroup <- ggplot(countAgeGroup, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Age.Group)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=4) +
+  scale_fill_brewer(palette=1) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+countRace <- df %>% group_by(Race) %>% summarise(totalCount=n()/nrow(df),
+            .groups = 'drop')
+countRace$ymax <- cumsum(countRace$totalCount)
+countRace$ymin <- c(0, head(countRace$ymax, n=-1))
+countRace$labelPosition <- (countRace$ymax + countRace$ymin) / 2
+countRace$label <- paste0(countRace$Race, "\n", 
+                                round(countRace$totalCount*100, 3), "%")
+
+plotCountRace <- ggplot(countRace, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Race)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=4) +
+  scale_fill_brewer(palette=5) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+
+title <- ggdraw() + draw_label("Частота лежання в лікарні", fontface='bold', size = 25)
+
+p <- plot_grid(plotCountGender, plotCountAgeGroup, plotCountRace,
+          labels = c("по статі", "по віку", "по расі"),
+          ncol = 3, nrow = 1)
+
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1))
+
+# Удалимо створенні змінні, щоб не засмічувати датасет
+rm(countGender, countAgeGroup, countRace, plotCountGender, plotCountAgeGroup, plotCountRace,
+   title)
+
+```
+
+
+Гістограми тривалості перебування в залежності від статі, раси, віку
+```{r}
+# СТАТЬ
+# Визначаємо відсотки
+stayTimeGender <- df %>% group_by(Gender) %>% summarise_at(vars(Length.of.Stay), 
+  funs(mean(., na.rm=TRUE)))
+# Створюємо графік
+plotStayTimeGender <- ggplot(stayTimeGender, 
+         aes(x=Gender, y=Length.of.Stay, fill=Gender)) +
+  geom_bar(stat = "summary", fun = "median") + # так треба
+  ylab("stay time") + xlab("gender") + # осі
+  scale_fill_brewer(palette=8) + # кольори
+  theme_bw() + # без фона
+  theme(legend.position = "none", 
+        axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+# ВІКОВА ГРУПА
+stayTimeAgeGroup <- df %>% group_by(Age.Group) %>% summarise_at(vars(Length.of.Stay), 
+  funs(mean(., na.rm=TRUE)))
+
+plotStayTimeAgeGroup <- ggplot(stayTimeAgeGroup, 
+         aes(x=Age.Group, y=Length.of.Stay, fill=Age.Group)) +
+  geom_bar(stat = "summary", fun = "median") +
+  ylab("stay time") + xlab("age group") +
+  scale_fill_brewer(palette=1) +
+  theme_bw() +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(legend.position = "none", 
+        axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+# РАСА
+stayTimeRace <- df %>% group_by(Race) %>% summarise_at(vars(Length.of.Stay), 
+  funs(mean(., na.rm=TRUE)))
+
+plotStayTimeRace <- ggplot(stayTimeRace, 
+          aes(x=Race, y=Length.of.Stay, fill=Race)) +
+  geom_bar(stat = "summary", fun = "median") +
+  ylab("stay time") + xlab("race") +
+  scale_fill_brewer(palette=5) +
+  theme_bw() +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(legend.position = "none", 
+        axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+
+title <- ggdraw() + draw_label("Середня тривалість перебування в лікарні", fontface='bold', size = title_size)
+
+p <- plot_grid(plotStayTimeGender, plotStayTimeAgeGroup, plotStayTimeRace,
+          ncol = 3, nrow = 1)
+
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1)) # останнє для відступу
+
+# Видалимо зайві змінні
+rm(stayTimeGender, stayTimeAgeGroup, stayTimeRace, plotStayTimeGender, plotStayTimeAgeGroup, plotStayTimeRace, p, title)
+
+```
+
+
+Ризик смертності в залежності від віку і статі
+```{r}
+# Кількість кожної групи
+countByGenderAgeGroup <- df %>% group_by(Gender, Age.Group) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+# Кількість кожної групи в залежності від тяжкості
+riskOfMortality <- df %>% group_by(Gender, Age.Group, APR.Risk.of.Mortality) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+# Функція, яка повертає відсоток від кількості
+calculatePercent <- function(x, output){
+  gender <- x[1]
+  agegroup <- x[2]
+  count <- countByGenderAgeGroup[countByGenderAgeGroup$Gender==gender &
+                              countByGenderAgeGroup$Age.Group==agegroup,]$totalCount
+  return(as.numeric(x[4])/count*100)
+}
+
+Percent <- apply(riskOfMortality, 1, calculatePercent)
+riskOfMortality <- cbind(riskOfMortality,Percent)
+
+
+# Об'єднаємо дві колонки в одну
+riskOfMortality$GenderRisk = paste(riskOfMortality$Gender, riskOfMortality$APR.Risk.of.Mortality)
+
+# Видалення зайвих колонок
+riskOfMortality <- riskOfMortality[,!names(riskOfMortality) %in% 
+      c("Gender", "APR.Risk.of.Mortality", "totalCount")]
+
+# Розбиваємо велику таблицю на 8 менших
+ROM <- riskOfMortality %>% group_split(GenderRisk)
+
+# Графік
+riskPlot <- ggplot()
+for (i in 1:length(ROM)) {   # i in 1:8
+  ROM_i = ROM[[i]]
+  riskPlot <- riskPlot + 
+    geom_line(group=1, ROM_i, mapping=aes(x=Age.Group, y=Percent, colour=GenderRisk)) +
+    geom_point(group=1, ROM_i, mapping=aes(x=Age.Group, y=Percent, colour=GenderRisk), size=3)
+}
+
+colors = c("M Minor"    = "#90e0ef", "F Minor"    = "#ffcccc", 
+           "M Moderate" = "#00b4d8", "F Moderate" = "#ff9999", 
+           "M Major"    = "#0077b6", "F Major"    = "#ff3333", 
+           "M Extreme"  = "#03045e", "F Extreme"  = "darkred")
+
+riskPlot <- riskPlot + 
+  scale_color_manual(name = "Gender Risk", values = colors) +
+  labs(x = "Age group") +
+  theme(axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+print(riskPlot)
+
+rm(countByGenderAgeGroup, riskOfMortality, calculatePercent, Percent, ROM, ROM_i, 
+   riskPlot, colors, i)
+
+```
+
+
+Ризик смертності в залежності від раси
+```{r}
+countByRace <- df %>% group_by(Race) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+# Кількість кожної групи в залежності від тяжкості
+riskOfMortality <- df %>% group_by (Race, APR.Risk.of.Mortality) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+calculatePercent <- function(x, output){
+  race <- x[1]
+  count <- countByRace[countByRace$Race==race,]$totalCount
+  return(as.numeric(x[3])/count*100)
+}
+
+Percent <- apply(riskOfMortality, 1, calculatePercent)
+riskOfMortality <- cbind(riskOfMortality,Percent)
+
+new_order <- c("Minor", "Moderate", "Major", "Extreme")
+riskOfMortality$APR.Risk.of.Mortality <- factor(riskOfMortality$APR.Risk.of.Mortality, levels = new_order)
+riskOfMortality <- riskOfMortality[order(riskOfMortality$APR.Risk.of.Mortality), ]
+
+ggplot(riskOfMortality, aes(x=APR.Risk.of.Mortality, y=Percent,
+                            fill=APR.Risk.of.Mortality)) +
+  geom_bar(stat="identity", position="dodge") +
+  facet_wrap(~ Race, ncol = 4) +
+  scale_fill_manual(values=c("#F6BDC0", "#F1959B", "#EA4C46", "#DC1C13")) +
+  xlab("Risk") + labs(fill = "Risk") +
+  # scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size),
+        strip.text = element_text(size = subTitle_size),
+        legend.text = element_text(size = label_size),
+        legend.title = element_text(size = subTitle_size))
+
+rm(countByRace, riskOfMortality, new_order, Percent)
+```
+
+
+Гістограми цін з логарифмічною віссю
+```{r}
+# За формулою Стерджеса обчислимо потрібне значення стовпців
+n <- 1 + floor(log2(nrow(df)))
+
+# Чомусь не працює
+# --------------------
+# # створимо нове полотно
+# plot.new()
+# # встановимо параметри графіків
+# par(mfrow = c(1, 2))
+# --------------------
+
+# Total.Charges
+# Обчислимо значення
+
+x <- df$Total.Charges
+maximum <- max(x)
+h <- hist(x, breaks = seq(min(x), maximum, length.out = n+1), plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#9999ff", "#000066"))
+barplot(h$counts, log = "y", col = gradient(length(h$counts)),
+        xlab = "Ціна у 100 000$", ylab = "Кількість  (log шкала)", main = "Total charges", 
+        cex.lab=1.5, cex.axis=1.5, cex.main=2.9, cex.sub=1.5) 
+axis(side = 1, at = seq(from = 0.1, by = 1.2, along.with = h$breaks), 
+     labels = round(h$breaks/100000, 1), cex.axis=1.7)
+
+# Total.Costs
+# Обчислимо значення
+x <- df$Total.Costs
+h <- hist(x,  breaks = seq(min(x), maximum, length.out = n+1), plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#ff9999", "#660000"))
+barplot(h$counts, log = "y", col = gradient(length(h$counts)),
+        xlab = "Ціна у 100 000$", ylab = "Кількість  (log шкала)", main = "Total costs", 
+        cex.lab=1.5, cex.axis=1.5, cex.main=2.9, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, along.with = h$breaks), 
+     labels = round(h$breaks/100000, 1), cex.axis=1.7)
+
+rm(x, h, gradient)
+```
+
+
+Гістограми цін з логарифмічним значенням
+```{r}
+
+# Total.Charges
+# Обчислимо значення
+x <- log(df$Total.Charges, base = exp(1))
+h <- hist(x, plot = FALSE, breaks=32)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#9999ff", "#000066"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "ln(ціна)", ylab = "Кількість", main = "Total charges",
+        cex.lab=1.5, cex.axis=1.5, cex.main=2.9, cex.sub=1.5) 
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)), 
+     labels = h$breaks, cex.axis=2)
+
+# Total.Costs
+# Обчислимо значення
+x <- log(df$Total.Costs, base = exp(1))
+h <- hist(x, plot = FALSE, breaks=32)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#ff9999", "#660000"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "ln(ціна)", ylab = "Кількість", main = "Total costs",
+        cex.lab=1.5, cex.axis=1.5, cex.main=2.9, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)),
+     labels = h$breaks, cex.axis=2)
+
+#rm(x, h, gradient)
+```
+
+```{r}
+# --------------------
+
+
+# Length.of.Stay
+# Обчислимо значення
+x <- df$Length.of.Stay
+h <- hist(x, plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#FCDE9C", "#FFA552", "#BA5624"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "Дні", log = 'y', ylab = "Кількість випадків (log шкала)", main = "Тривалість перебування",
+        cex.lab=1.5, cex.axis=1.5, cex.main=3, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)), labels=h$breaks, cex.axis=1.7)
+# rm(x, h, gradient)
+
+# ln(Length.of.Stay)
+# Обчислимо значення
+x <- log(df$Length.of.Stay, base=exp(1))
+h <- hist(x, plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#FCDE9C", "#FFA552", "#BA5624"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "ln(Дні)", ylab = "Кількість випадків", main = "Тривалість перебування",
+        cex.lab=1.5, cex.axis=1.5, cex.main=3, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)), labels=h$breaks, cex.axis=1.7)
+# rm(x, h, gradient)
+
+```
+
+
+
