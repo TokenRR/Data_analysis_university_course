@@ -1,0 +1,1129 @@
+
+Завантажуємо бібліотеки (розкоментувати тільки при першому запуску)
+```{r}
+# install.packages("dplyr") # для оператора %>%
+# install.packages("tidyr") # для drop_na
+# install.packages("ggplot2") # для візуалізації
+# install.packages("cowplot") # для об'єднання графіків в один
+# install.packages("reshape2") # для форматування таблиць
+# install.packages("GGally") # каралелограма
+# install.packages("stargazer")
+# install.packages("lmtest")
+# install.packages("car")
+```
+
+
+Підключаємо бібліотеки
+```{r}
+library(dplyr)
+library(tidyr) 
+library(ggplot2)
+library(cowplot)
+library(reshape2)
+library(GGally)
+library(boot)
+library(stargazer)
+library(lmtest)
+library(car)
+
+```
+
+
+Загальні налаштування
+```{r}
+# Тема для графіків
+theme_set(theme_minimal())
+
+label_size = 15     # axis labels
+subTitle_size = 20  # subtitle and axis title
+title_size = 25     # main title
+
+```
+
+
+Завантажимо наш датасет
+```{r}
+hos_df = read.csv('Hospital_Inpatient_Discharges__SPARCS_De-Identified___2015.csv', 
+                  na.strings = c("", "Na", "NA", "NULL", "Nan"))
+# na.string() замінює рядкове 'пусте' значення на Na значеня у мові R
+print('Датасет успішно завантажено')
+```
+
+
+Перевіримо назви і типи даних колонок нашого датасету
+```{r}
+str(hos_df, give.attr = FALSE)
+```
+
+
+Переглянемо перші 5 записів нашого датасету
+```{r}
+head(hos_df, 5)
+```
+
+
+Переглянемо останні 5 записів нашого датасету
+```{r}
+tail(hos_df, 5)
+```
+
+
+Перевіримо унікальні значеня першого стовпця
+(Очікуємо побачити Na, це буде означати, що заміна відбулась коректно)
+```{r}
+unique(hos_df$Health.Service.Area)
+```
+
+
+Перевіримо, скільки Na значень у кожного стовпця
+```{r}
+sapply(hos_df, function(x) sum(is.na(x)))
+```
+
+Як бачимо, Na значень багато
+Переглянемо назви колонок (Копіював для вставки у код для видалення колонок)
+```{r}
+colnames(hos_df)
+```
+
+
+Видалимо 'Номер ліцензії іншого постачальника', оскільки майже 2/3 цих рядків мають значення Na.
+Також видалимо інші стовпці зі значною кількістю Na, оскільки з них буде важко отримати значення
+```{r}
+df = hos_df[,!names(hos_df) %in% c('Other.Provider.License.Number',
+                                   'Payment.Typology.2',
+                                   'Payment.Typology.3',
+                                   'Operating.Provider.License.Number')]
+```
+
+
+Але в нас ще лишились Na значення у таких колонках: Health.Service.Area = 2911 Na
+                                                    Hospital.County = 2911 Na
+                                                    Operating.Certificate.Number = 2911 Na
+                                                    Facility.Id = 2911 Na
+                                                    Zip.Code...3.digits = 4427 Na
+                                                    APR.Severity.of.Illness.Description = 112 Na
+                                                    APR.Risk.of.Mortality = 112 Na
+                                                    Attending.Provider.License.Number = 2911 Na
+                                                     
+Оскільки кількість Na значень відносно невелика, то ми можемо їх видалити
+```{r}
+df <- df %>% drop_na()
+```
+
+
+Перевіримо скільки наш датасет містить у собі Na значень
+(Очікуємо 0)
+```{r}
+sum(is.na(df))
+```
+
+
+Перевіримо кількість пацієнтів з невизначеною статю
+```{r}
+countGender <- df %>% group_by(Gender) %>% count()
+print(countGender[countGender$Gender=='U',])
+rm(countGender)
+```
+
+
+Оскільки таких рядків всього 39, можемо видалити їх
+```{r}
+df <- df[!df$Gender=="U",]
+```
+
+
+Приведення до numeric колокти Length.of.Stay , Total.Charges , Total.Costs
+```{r}
+
+# Якщо пацієнт лежав в лікарні більше 120 днів, запишемо їх значення перебування як 121
+df["Length.of.Stay"][df["Length.of.Stay"] == "120 +"] <- "121"
+df <- transform(df, Length.of.Stay = as.numeric(Length.of.Stay))
+
+# Перетворюємо ціну у числовий формат
+df$Total.Charges <- as.numeric(gsub("\\$", "", df$Total.Charges))
+df$Total.Costs <- as.numeric(gsub("\\$", "", df$Total.Costs))
+
+```
+
+
+Для адекватного розрахунку характеристик колонки Birth.Weight замінимо значення 0 на NA. Ці значення не видалятимемо, бо вони є абсолютно адекватними для випадків, що не є пологами.
+```{r}
+df$Birth.Weight <- ifelse(df$Birth.Weight == 0, NA, df$Birth.Weight)
+```
+
+
+Переглянемо детальніше інформацію про колонки
+```{r}
+summary(df)
+```
+
+
+Знову переглянемо характеристики вже очищеного датасету
+```{r}
+str(df, give.attr = FALSE)
+```
+
+
+Кругові графіки розподілу за статтю, расою та віком
+```{r}
+# Обчислимо відсотки
+countGender <- df %>% group_by(Gender) %>% summarise(totalCount=n()/nrow(df),
+            .groups = 'drop')
+# Обчислимо кумулятивні відсотки (значення верху кожного прямокутника)
+countGender$ymax <- cumsum(countGender$totalCount)
+
+# Обчислимо ніжні значення кожного прямокутника
+countGender$ymin <- c(0, head(countGender$ymax, n=-1))
+
+
+# Обчислимо розміщення підписів
+countGender$labelPosition <- (countGender$ymax + countGender$ymin) / 2
+
+# РОзрахуємо заголовки
+countGender$label <- paste0(countGender$Gender, "\n", 
+                                round(countGender$totalCount*100, 3), "%")
+
+# Створюємо графік
+plotCountGender <- ggplot(countGender, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Gender)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=4) +
+  scale_fill_brewer(palette=8) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+
+countAgeGroup <- df %>% group_by(Age.Group) %>% summarise(totalCount=n()/nrow(df),
+            .groups = 'drop')
+countAgeGroup$ymax <- cumsum(countAgeGroup$totalCount)
+countAgeGroup$ymin <- c(0, head(countAgeGroup$ymax, n=-1))
+countAgeGroup$labelPosition <- (countAgeGroup$ymax + countAgeGroup$ymin) / 2
+countAgeGroup$label <- paste0(countAgeGroup$Age.Group, "\n", 
+                                round(countAgeGroup$totalCount*100, 3), "%")
+
+plotCountAgeGroup <- ggplot(countAgeGroup, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Age.Group)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=4) +
+  scale_fill_brewer(palette=1) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+countRace <- df %>% group_by(Race) %>% summarise(totalCount=n()/nrow(df),
+            .groups = 'drop')
+countRace$ymax <- cumsum(countRace$totalCount)
+countRace$ymin <- c(0, head(countRace$ymax, n=-1))
+countRace$labelPosition <- (countRace$ymax + countRace$ymin) / 2
+countRace$label <- paste0(countRace$Race, "\n", 
+                                round(countRace$totalCount*100, 3), "%")
+
+plotCountRace <- ggplot(countRace, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Race)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=4) +
+  scale_fill_brewer(palette=5) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+
+title <- ggdraw() + draw_label("Частота лежання в лікарні", fontface='bold', size = 25)
+
+p <- plot_grid(plotCountGender, plotCountAgeGroup, plotCountRace,
+          labels = c("по статі", "по віку", "по расі"),
+          ncol = 3, nrow = 1)
+
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1))
+
+# Удалимо створенні змінні, щоб не засмічувати датасет
+rm(countGender, countAgeGroup, countRace, plotCountGender, plotCountAgeGroup, plotCountRace,
+   title)
+
+```
+
+
+Гістограми тривалості перебування в залежності від статі, раси, віку
+```{r}
+# СТАТЬ
+# Визначаємо відсотки
+stayTimeGender <- df %>% group_by(Gender) %>% summarise_at(vars(Length.of.Stay), 
+  funs(mean(., na.rm=TRUE)))
+# Створюємо графік
+plotStayTimeGender <- ggplot(stayTimeGender, 
+         aes(x=Gender, y=Length.of.Stay, fill=Gender)) +
+  geom_bar(stat = "summary", fun = "median") + # так треба
+  ylab("stay time") + xlab("gender") + # осі
+  scale_fill_brewer(palette=8) + # кольори
+  theme_bw() + # без фона
+  theme(legend.position = "none", 
+        axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+# ВІКОВА ГРУПА
+stayTimeAgeGroup <- df %>% group_by(Age.Group) %>% summarise_at(vars(Length.of.Stay), 
+  funs(mean(., na.rm=TRUE)))
+
+plotStayTimeAgeGroup <- ggplot(stayTimeAgeGroup, 
+         aes(x=Age.Group, y=Length.of.Stay, fill=Age.Group)) +
+  geom_bar(stat = "summary", fun = "median") +
+  ylab("stay time") + xlab("age group") +
+  scale_fill_brewer(palette=1) +
+  theme_bw() +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(legend.position = "none", 
+        axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+# РАСА
+stayTimeRace <- df %>% group_by(Race) %>% summarise_at(vars(Length.of.Stay), 
+  funs(mean(., na.rm=TRUE)))
+
+plotStayTimeRace <- ggplot(stayTimeRace, 
+          aes(x=Race, y=Length.of.Stay, fill=Race)) +
+  geom_bar(stat = "summary", fun = "median") +
+  ylab("stay time") + xlab("race") +
+  scale_fill_brewer(palette=5) +
+  theme_bw() +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(legend.position = "none", 
+        axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+
+title <- ggdraw() + draw_label("Середність тривалість перебування в лікарні", fontface='bold', size = title_size)
+
+p <- plot_grid(plotStayTimeGender, plotStayTimeAgeGroup, plotStayTimeRace,
+          ncol = 3, nrow = 1)
+
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1)) # останнє для відступу
+
+# Видалимо зайві змінні
+rm(stayTimeGender, stayTimeAgeGroup, stayTimeRace, plotStayTimeGender, plotStayTimeAgeGroup, plotStayTimeRace, p, title)
+
+```
+
+
+Ризик смертності в залежності від віку і статі
+```{r}
+# Кількість кожної групи
+countByGenderAgeGroup <- df %>% group_by(Gender, Age.Group) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+# Кількість кожної групи в залежності від тяжкості
+riskOfMortality <- df %>% group_by(Gender, Age.Group, APR.Risk.of.Mortality) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+# Функція, яка повертає відсоток від кількості
+calculatePercent <- function(x, output){
+  gender <- x[1]
+  agegroup <- x[2]
+  count <- countByGenderAgeGroup[countByGenderAgeGroup$Gender==gender &
+                              countByGenderAgeGroup$Age.Group==agegroup,]$totalCount
+  return(as.numeric(x[4])/count*100)
+}
+
+Percent <- apply(riskOfMortality, 1, calculatePercent)
+riskOfMortality <- cbind(riskOfMortality,Percent)
+
+
+# Об'єднаємо дві колонки в одну
+riskOfMortality$GenderRisk = paste(riskOfMortality$Gender, riskOfMortality$APR.Risk.of.Mortality)
+
+# Видалення зайвих колонок
+riskOfMortality <- riskOfMortality[,!names(riskOfMortality) %in% 
+      c("Gender", "APR.Risk.of.Mortality", "totalCount")]
+
+# Розбиваємо велику таблицю на 8 менших
+ROM <- riskOfMortality %>% group_split(GenderRisk)
+
+# Графік
+riskPlot <- ggplot()
+for (i in 1:length(ROM)) {   # i in 1:8
+  ROM_i = ROM[[i]]
+  riskPlot <- riskPlot + 
+    geom_line(group=1, ROM_i, mapping=aes(x=Age.Group, y=Percent, colour=GenderRisk)) +
+    geom_point(group=1, ROM_i, mapping=aes(x=Age.Group, y=Percent, colour=GenderRisk), size=3)
+}
+
+colors = c("M Minor"    = "#90e0ef", "F Minor"    = "#ffcccc", 
+           "M Moderate" = "#00b4d8", "F Moderate" = "#ff9999", 
+           "M Major"    = "#0077b6", "F Major"    = "#ff3333", 
+           "M Extreme"  = "#03045e", "F Extreme"  = "darkred")
+
+riskPlot <- riskPlot + 
+  scale_color_manual(name = "Gender Risk", values = colors) +
+  labs(x = "Age group") +
+  theme(axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size))
+
+print(riskPlot)
+
+rm(countByGenderAgeGroup, riskOfMortality, calculatePercent, Percent, ROM, ROM_i, 
+   riskPlot, colors, i)
+
+```
+
+
+Ризик смертності в залежності від раси
+```{r}
+countByRace <- df %>% group_by(Race) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+# Кількість кожної групи в залежності від тяжкості
+riskOfMortality <- df %>% group_by (Race, APR.Risk.of.Mortality) %>% summarise(totalCount=n(),
+            .groups = 'drop')
+
+calculatePercent <- function(x, output){
+  race <- x[1]
+  count <- countByRace[countByRace$Race==race,]$totalCount
+  return(as.numeric(x[3])/count*100)
+}
+
+Percent <- apply(riskOfMortality, 1, calculatePercent)
+riskOfMortality <- cbind(riskOfMortality,Percent)
+
+new_order <- c("Minor", "Moderate", "Major", "Extreme")
+riskOfMortality$APR.Risk.of.Mortality <- factor(riskOfMortality$APR.Risk.of.Mortality, levels = new_order)
+riskOfMortality <- riskOfMortality[order(riskOfMortality$APR.Risk.of.Mortality), ]
+
+ggplot(riskOfMortality, aes(x=APR.Risk.of.Mortality, y=Percent,
+                            fill=APR.Risk.of.Mortality)) +
+  geom_bar(stat="identity", position="dodge") +
+  facet_wrap(~ Race, ncol = 4) +
+  scale_fill_manual(values=c("#F6BDC0", "#F1959B", "#EA4C46", "#DC1C13")) +
+  xlab("Risk") + labs(fill = "Risk") +
+  # scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(axis.text = element_text(size=label_size),
+        axis.title = element_text(size=subTitle_size),
+        strip.text = element_text(size = subTitle_size),
+        legend.text = element_text(size = label_size),
+        legend.title = element_text(size = subTitle_size))
+
+rm(countByRace, riskOfMortality, new_order, Percent)
+```
+
+
+Гістограми цін з логарифмічною віссю
+```{r}
+# За формулою Стерджеса обчислимо потрібне значення стовпців
+n <- 1 + floor(log2(nrow(df)))
+
+# Чомусь не працює
+# --------------------
+# # створимо нове полотно
+# plot.new()
+# # встановимо параметри графіків
+# par(mfrow = c(1, 2))
+# --------------------
+
+# Total.Charges
+# Обчислимо значення
+
+x <- df$Total.Charges
+maximum <- max(x)
+h <- hist(x, breaks = seq(min(x), maximum, length.out = n+1), plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#9999ff", "#000066"))
+barplot(h$counts, log = "y", col = gradient(length(h$counts)),
+        xlab = "Ціна у 100 000$", ylab = "Кількість  (log шкала)", main = "Total charges", 
+        cex.lab=1.5, cex.axis=1.5, cex.main=1.5, cex.sub=1.5) 
+axis(side = 1, at = seq(from = 0.1, by = 1.2, along.with = h$breaks), 
+     labels = round(h$breaks/100000, 1), cex.axis=1.7)
+
+# Total.Costs
+# Обчислимо значення
+x <- df$Total.Costs
+h <- hist(x,  breaks = seq(min(x), maximum, length.out = n+1), plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#ff9999", "#660000"))
+barplot(h$counts, log = "y", col = gradient(length(h$counts)),
+        xlab = "Ціна у 100 000$", ylab = "Кількість  (log шкала)", main = "Total costs", 
+        cex.lab=1.5, cex.axis=1.5, cex.main=1.5, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, along.with = h$breaks), 
+     labels = round(h$breaks/100000, 1), cex.axis=1.7)
+
+rm(x, h, gradient)
+```
+
+
+Гістограми цін з логарифмічним значенням
+```{r}
+
+# Total.Charges
+# Обчислимо значення
+x <- log(df$Total.Charges, base = exp(1))
+h <- hist(x, plot = FALSE, breaks=32)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#9999ff", "#000066"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "ln(ціна)", ylab = "Кількість", main = "Загальна ціна",
+        cex.lab=1.5, cex.axis=1.5, cex.main=2.9, cex.sub=1.5) 
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)), 
+     labels = h$breaks, cex.axis=2)
+
+# Total.Costs
+# Обчислимо значення
+x <- log(df$Total.Costs, base = exp(1))
+h <- hist(x, plot = FALSE, breaks=32)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#ff9999", "#660000"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "ln(ціна)", ylab = "Кількість", main = "Загальна собівартість",
+        cex.lab=1.5, cex.axis=1.5, cex.main=2.9, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)),
+     labels = h$breaks, cex.axis=2)
+
+#rm(x, h, gradient)
+```
+
+
+???
+```{r}
+# --------------------
+
+
+# Length.of.Stay
+# Обчислимо значення
+x <- df$Length.of.Stay
+h <- hist(x, plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#FCDE9C", "#FFA552", "#BA5624"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "Дні", log = 'y', ylab = "Кількість випадків (log шкала)", main = "Тривалість перебування",
+        cex.lab=1.5, cex.axis=1.5, cex.main=3, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)), labels=h$breaks, cex.axis=1.7)
+# rm(x, h, gradient)
+
+# ln(Length.of.Stay)
+# Обчислимо значення
+x <- log(df$Length.of.Stay, base=exp(1))
+h <- hist(x, plot = FALSE)
+h$counts[h$counts <= 0] <- 1e-1
+# h
+
+# Будуємо графік
+gradient <- colorRampPalette(c("#FCDE9C", "#FFA552", "#BA5624"))
+barplot(h$counts, col = gradient(length(h$counts)),
+        xlab = "ln(Дні)", ylab = "Кількість випадків", main = "Тривалість перебування",
+        cex.lab=1.5, cex.axis=1.5, cex.main=3, cex.sub=1.5)
+axis(side = 1, at = seq(from = 0.1, by = 1.2, length = length(h$breaks)), labels=h$breaks, cex.axis=1.7)
+# rm(x, h, gradient)
+
+```
+
+
+Довірчі інтервали mean (t-розподіл)
+```{r}
+# Розкоментуй потрібну колонку
+data <- df$Length.of.Stay
+# data <- df$Total.Charges
+# data <- df$Total.Costs
+
+# Розрахунок середнього значення і стандартного відхилення
+mean_value <- mean(data)
+sd_value <- sd(data)
+
+# Розмір вибірки
+n <- length(data)
+
+# Рівень довіри (від 0 до 1)
+confidence_level <- 0.95
+
+# Обчислення стандартної помилки
+se <- sd_value / sqrt(n)
+
+# Обчислення критичного значення t
+t_value <- qt((1 + confidence_level) / 2, df = n - 1)
+
+# Обчислення довірчого інтервалу
+lower_bound <- mean_value - t_value * se
+upper_bound <- mean_value + t_value * se
+
+# Виведення результатів
+cat("Довірчий інтервал:", "\n")
+cat("Середнє значення:", mean_value, "\n")
+cat("Стандартнє відхилення:", sd_value, "\n")
+cat("Нижня межа:", lower_bound, "\n")
+cat("Верхня межа:", upper_bound)
+```
+
+
+Довірчій інтервал mean Birth.Weight(t-розподіл)
+```{r}
+data <- df$Birth.Weight
+
+# Calculation of mean value and standard deviation, ignoring NA
+mean_value <- mean(data, na.rm = TRUE)
+sd_value <- sd(data, na.rm = TRUE)
+
+# Sample size
+n <- sum(!is.na(data))
+
+# Confidence level (from 0 to 1)
+confidence_level <- 0.95
+
+# Calculation of standard error
+se <- sd_value / sqrt(n)
+
+# Calculation of the t critical value
+t_value <- qt((1 + confidence_level) / 2, df = n - 1)
+
+# Calculation of the confidence interval
+lower_bound <- mean_value - t_value * se
+upper_bound <- mean_value + t_value * se
+
+# Outputting the results
+cat("Довірчий інтервал:", "\n")
+cat("Середнє значення:", mean_value, "\n")
+cat("Стандартнє відхилення:", sd_value, "\n")
+cat("Нижня межа:", lower_bound, "\n")
+cat("Верхня межа:", upper_bound)
+```
+
+
+Довірчий інтервал mean для довжини перебування (бутстреп)
+```{r}
+# mean_func <- function(data, index) {
+#   trimmed_data <- data[index]
+#   # Set the proportion to trim from both ends
+#   trim_proportion <- 0.05
+#   n_to_trim <- round(length(trimmed_data) * trim_proportion)
+#   
+#   # Sort the data in ascending order
+#   sorted_data <- sort(trimmed_data)
+#   
+#   # Trim the extreme values
+#   trimmed_data <- sorted_data[(n_to_trim + 1):(length(sorted_data) - n_to_trim)]
+#   
+#   mean(trimmed_data)
+# }
+mean_func <- function(data, index) {
+  mean(data[index])
+}
+
+# Set the number of bootstrap iterations
+n_iterations <- 100
+
+# Randomly sample a subset of the data
+subset_data <- sample(df$Length.of.Stay, size = 1000000, replace = FALSE)
+
+# Perform the bootstrap resampling on the subset_data
+boot_obj <- boot(data = subset_data, statistic = mean_func, R = n_iterations)
+
+# Compute the bootstrap confidence interval
+boot_ci <- boot.ci(boot_obj, type = "basic")
+print(boot_ci)
+```
+
+
+Довірчий інтервал mean для ціни (бутстреп)
+```{r}
+mean_func <- function(data, index) {
+  mean(data[index])
+}
+
+# Set the number of bootstrap iterations
+n_iterations <- 100
+
+# Randomly sample a subset of the data
+subset_data <- sample(df$Total.Charges, size = 1000000, replace = FALSE)
+
+# Perform the bootstrap resampling on the subset_data
+boot_obj <- boot(data = subset_data, statistic = mean_func, R = n_iterations)
+
+# Compute the bootstrap confidence interval
+boot_ci <- boot.ci(boot_obj, type = "basic")
+print(boot_ci)
+```
+
+
+Довірчий інтервал mean для собівартості (бутстреп)
+```{r}
+mean_func <- function(data, index) {
+  mean(data[index])
+}
+
+# Set the number of bootstrap iterations
+n_iterations <- 100
+
+# Randomly sample a subset of the data
+subset_data <- sample(df$Total.Costs, size = 1000000, replace = FALSE)
+
+# Perform the bootstrap resampling on the subset_data
+boot_obj <- boot(data = subset_data, statistic = mean_func, R = n_iterations)
+
+# Compute the bootstrap confidence interval
+boot_ci <- boot.ci(boot_obj, type = "basic")
+print(boot_ci)
+```
+
+
+Довірчий інтервал mean для ваги при народженні (бутстреп)
+```{r}
+mean_func <- function(data, index) {
+  mean(data[index])
+}
+
+# Set the number of bootstrap iterations
+n_iterations <- 100
+
+# Exclude NA values from the data
+subset_data <- df$Birth.Weight[!is.na(df$Birth.Weight)]
+
+# Perform the bootstrap resampling on the subset_data
+boot_obj <- boot(data = subset_data, statistic = mean_func, R = n_iterations)
+
+# Compute the bootstrap confidence interval
+boot_ci <- boot.ci(boot_obj, type = "basic")
+print(boot_ci)
+```
+
+
+довірчі інтервали median та 1's, 3's quantile (бутстреп)
+```{r}
+# Create a function to calculate the median
+get_median <- function(data, index) {
+  median(data[index])
+}
+get_quantile <- function(data, index) {
+  return(quantile(data[index], probs = 0.25))
+}
+
+# Set the number of bootstrap iterations
+n_iterations <- 3000
+
+# Randomly sample a subset of the data
+subset_data <- sample(df$Total.Charges, size = 1000000, replace = FALSE)
+# subset_data <- df$Birth.Weight[!is.na(df$Birth.Weight)]  #  Якщо Birth.Weight
+
+# Perform the bootstrap resampling on the subset_data
+boot_obj <- boot(data = subset_data, statistic = get_quantile, R = n_iterations)
+
+# Compute the bootstrap confidence interval
+boot_ci <- boot.ci(boot_obj, type = "basic")
+print(boot_ci)
+
+```
+
+
+Довірчі інтервали для квантилів 
+```{r}
+# data <- df$Length.of.Stay
+# data <- df$Total.Charges
+# data <- df$Total.Costs
+
+# Рівень довіри (наприклад, 95%)
+confidence_level <- 0.95
+
+# Кількість спостережень
+n <- nrow(df)
+
+# Дані для обчислення довірчого інтервалу
+data <- na.omit(df$Birth.Weight)
+
+# Обчислення 1-го квантилю
+quantile_value <- quantile(data, probs = 0.75)
+
+# Стандартна помилка оцінки 1-го квантилю
+standard_error <- sd(data) / sqrt(n)
+
+# Критичне значення t для потрібного рівня довіри
+t_critical <- qt((1 + confidence_level) / 2, df = n - 1)
+
+# Обчислення довірчого інтервалу для 1-го квантилю
+lower_bound <- quantile_value - t_critical * standard_error
+upper_bound <- quantile_value + t_critical * standard_error
+
+# Обчислення дисперсії квантилю через бутстреп
+num_bootstraps <- 100
+bootstrap_variances <- numeric(num_bootstraps)
+
+for (i in 1:num_bootstraps) {
+  bootstrap_sample <- sample(data, replace = TRUE)
+  bootstrap_quantile <- quantile(bootstrap_sample, probs = 0.75)
+  bootstrap_variance <- var(bootstrap_sample)
+  bootstrap_variances[i] <- bootstrap_variance
+}
+
+bootstrap_variance_estimate <- mean(bootstrap_variances)
+
+# Виведення результатів
+cat("Довірчий інтервал для 3-го квантилю колонки 'Birth.Weight' (", confidence_level * 100, "%): [", lower_bound, ",", upper_bound, "]\n")
+cat("Оцінка дисперсії квантилю через бутстреп: ", bootstrap_variance_estimate)
+# Обчислення точної дисперсії
+variance <- var(data)
+cat("\nТочна дисперсія колонки 'Birth.Weight': ", variance)
+
+```
+
+
+Перевірка гіпотез щодо відсоткових розподілів (як матсподівань для розподілів Бернуллі) за расою, статтю та віковою групою у вибірці в лікарнях відносно відсотків у популяції штату на момент спостереження.
+```{r}
+options(digits = 10)
+test_fraction_hyp <- function (column, fraction_name, equals_to, alpha) {
+  n <- nrow(df)
+  n_fraction <- nrow(df %>% filter(get({{column}}) == fraction_name))
+  p_hat <- n_fraction/n
+
+  var_hat_p_hat <- p_hat*(1-p_hat)/n
+  se_hat <- sqrt(var_hat_p_hat)
+  
+  T = (p_hat - equals_to)/se_hat
+  p_value <- 2*pnorm(-abs(T), sd=1)
+  conclusion <- character()
+  
+  if (abs(T) > qnorm(1-alpha/2, mean=0, sd=1)) {
+    conclusion <- "H0 hypothesys should be rejected."
+  } else {
+    conclusion <- "We have no proofs for rejecting H0 hypothesys."
+  }
+  
+  conf.int <- c(p_hat - qnorm(1-alpha/2, mean=0, sd=1)*se_hat, p_hat + qnorm(1-alpha/2, mean=0, sd=1)*se_hat)
+  result <- paste("-------------------------",
+                  sprintf("\nWald test\n"),
+                  sprintf("For probability of %s from column %s", fraction_name, column),
+                  conclusion,
+                  sprintf("Estimated probability: %f", p_hat),
+                  sprintf("Probability to compare to: %f", equals_to),
+                  sprintf("Confidence interval for this test: (%f, %f)", conf.int[1], conf.int[2]),
+                  sprintf("Estimated std: %f", se_hat),
+                  sprintf("T for this test: %f", T),
+                  sprintf("P value for this test: %f", p_value),
+                  "-------------------------", sep='\n')
+  
+  cat(result)
+  return(invisible(NULL))
+}
+
+
+test_fraction_hyp("Gender", "F", 0.51447, 0.05)
+test_fraction_hyp("Gender", "M", 0.48553, 0.05)
+cat('\n\n')
+test_fraction_hyp("Race", "White", 0.703, 0.05)
+test_fraction_hyp("Race", "Black/African American", 0.176, 0.05)
+test_fraction_hyp("Race", "Other Race", 0.097, 0.05)
+test_fraction_hyp("Race", "Multi-racial", 0.024, 0.05)
+cat('\n\n')
+test_fraction_hyp("Age.Group", "0 to 17", 0.21271, 0.05)
+test_fraction_hyp("Age.Group", "18 to 29", 0.17376, 0.05)
+test_fraction_hyp("Age.Group", "30 to 49", 0.26336, 0.05)
+test_fraction_hyp("Age.Group", "50 to 69", 0.24955, 0.05)
+test_fraction_hyp("Age.Group", "70 or Older", 0.10062, 0.05)
+
+
+```
+
+
+Гіпотези щодо рівностей вибіркових середніх для тривалості перебування у лікарні для чоловіків та жінок.
+```{r}
+alpha <- 0.05
+n <- nrow(df)
+estimates <-  df %>% group_by(Gender) %>% summarise(mean_value = mean(Length.of.Stay),
+                                      var_value = var (Length.of.Stay)/n)
+
+
+mean_female <- estimates %>% filter(Gender == "F") %>% pull(mean_value)
+mean_male <- estimates %>% filter(Gender == "M") %>% pull(mean_value)
+
+var_female <- estimates %>% filter(Gender == "F") %>% pull(var_value)
+var_male <- estimates %>% filter(Gender == "M") %>% pull(var_value)
+
+mean_hat <- mean_male - mean_female
+se_hat <- sqrt(var_male + var_female)
+
+T <- mean_hat/se_hat
+p_value <- pnorm(T, lower.tail = FALSE)
+
+if (T > qnorm(1-alpha, mean=0, sd=1)) {
+    conclusion <- "H0 hypothesys should be rejected."
+} else {
+    conclusion <- "We have no proofs for rejecting H0 hypothesys."
+}
+  
+conf.int <- c(mean_male - mean_female - qnorm(1-alpha)*se_hat, Inf)
+
+result <- paste("-------------------------",
+                  sprintf("\nWald test\n"),
+                  sprintf("Compare mean_length_male - mean_length_female to zero."),
+                  conclusion,
+                  sprintf("Estimated mean difference: %f", mean_hat),
+                  sprintf("Confidence interval for this test: (%f, %f)", conf.int[1], conf.int[2]),
+                  sprintf("Estimated std: %f", se_hat),
+                  sprintf("T for this test: %f", T),
+                  sprintf("P value for this test: %f", p_value),
+                  "-------------------------", sep='\n')
+  
+cat(result)
+```
+
+
+Гіпотези щодо рівностей вибіркових середніх для тривалості перебування у лікарні для представників різних рас попарно.
+```{r}
+alpha <- 0.05
+n <- nrow(df)
+estimates <-  df %>% group_by(Race) %>% summarise(mean_value = mean(Length.of.Stay),
+                                      var_value = var (Length.of.Stay)/n)
+races <- unique(df$Race)
+rac <- t(combn(races, 2))
+for (i in 1:nrow(rac)) {
+    race1 <- rac[i, 1]
+    race2 <- rac[i, 2]
+    mean_one <- estimates %>% filter(Race == race1) %>% pull(mean_value)
+    mean_two <- estimates %>% filter(Race == race2) %>% pull(mean_value)
+    
+    var_one <- estimates %>% filter(Race == race1) %>% pull(var_value)
+    var_two <- estimates %>% filter(Race == race2) %>% pull(var_value)
+    
+    mean_hat <- mean_one - mean_two
+    se_hat <- sqrt(var_one + var_two)
+    
+    T <- mean_hat/se_hat
+    p_value <- 2*pnorm(-abs(T))
+    
+    if (abs(T) > qnorm(1-alpha/2, mean=0, sd=1)) {
+        conclusion <- "H0 hypothesys should be rejected."
+    } else {
+        conclusion <- "We have no proofs for rejecting H0 hypothesys."
+    }
+      
+    conf.int <- c(mean_hat - qnorm(1-alpha/2, mean=0, sd=1)*se_hat, mean_hat + qnorm(1-alpha/2, mean=0, sd=1)*se_hat)
+    
+    result <- paste("-------------------------",
+                    sprintf("\nWald test\n"),
+                    sprintf("Compare %s and %s.", race1, race2),
+                    conclusion,
+                    sprintf("Estimated mean difference: %f", mean_hat),
+                    sprintf("Confidence interval for this test: (%f, %f)", conf.int[1], conf.int[2]),
+                    sprintf("Estimated std: %f", se_hat),
+                    sprintf("T for this test: %f", T),
+                    sprintf("P value for this test: %f", p_value),
+                    "-------------------------", sep='\n')
+    cat(result)
+}
+```
+
+
+Гіпотези щодо рівностей вибіркових середніх для тривалості перебування у лікарні для представників різних вікових груп попарно між собою.
+```{r}
+alpha <- 0.05
+n <- nrow(df)
+estimates <-  df %>% group_by(Age.Group) %>% summarise(mean_value = mean(Length.of.Stay),
+                                      var_value = var (Length.of.Stay)/n)
+races <- unique(df$Age.Group)
+rac <- t(combn(races, 2))
+for (i in 1:nrow(rac)) {
+    race1 <- rac[i, 1]
+    race2 <- rac[i, 2]
+    mean_one <- estimates %>% filter(Age.Group == race1) %>% pull(mean_value)
+    mean_two <- estimates %>% filter(Age.Group == race2) %>% pull(mean_value)
+    
+    var_one <- estimates %>% filter(Age.Group == race1) %>% pull(var_value)
+    var_two <- estimates %>% filter(Age.Group == race2) %>% pull(var_value)
+    
+    mean_hat <- mean_one - mean_two
+    se_hat <- sqrt(var_one + var_two)
+    
+    T <- mean_hat/se_hat
+    p_value <- 2*pnorm(-abs(T))
+    
+    if (abs(T) > qnorm(1-alpha/2, mean=0, sd=1)) {
+        conclusion <- "H0 hypothesys should be rejected."
+    } else {
+        conclusion <- "We have no proofs for rejecting H0 hypothesys."
+    }
+      
+    conf.int <- c(mean_hat - qnorm(1-alpha/2, mean=0, sd=1)*se_hat, mean_hat + qnorm(1-alpha/2, mean=0, sd=1)*se_hat)
+    
+    result <- paste("-------------------------",
+                    sprintf("\nWald test\n"),
+                    sprintf("Compare %s and %s.", race1, race2),
+                    conclusion,
+                    sprintf("Estimated mean difference: %f", mean_hat),
+                    sprintf("Confidence interval for this test: (%f, %f)", conf.int[1], conf.int[2]),
+                    sprintf("Estimated std: %f", se_hat),
+                    sprintf("T for this test: %f", T),
+                    sprintf("P value for this test: %f", p_value),
+                    "-------------------------", sep='\n')
+    cat(result)
+}
+```
+
+
+Перевірка рівностей розподілів для різних важкостей захворювань по вікових групах для різних статей.
+```{r}
+for (age in unique(df$Age.Group)) {
+
+    men <- df %>% filter(Age.Group == age, Gender == "M") %>% group_by(APR.Risk.of.Mortality) %>% summarise(male_total_count=n())
+    woman <- df %>% filter(Age.Group == age, Gender == "F") %>% group_by(APR.Risk.of.Mortality) %>% summarise(female_total_count=n())
+
+    cat('For age', age)
+    cat("\nCounts are:\n")
+    print(cbind(male_count = men$male_total_count, female_count = woman$female_total_count))
+    result <- chisq.test(cbind(men$male_total_count, y=woman$female_total_count), simulate.p.value=TRUE)
+    print(result)
+}
+```
+
+
+Перевірка рівностей розподілів для різних важкостей захворювань по расових групах.
+```{r}
+
+races <- unique(df$Race)
+rac <- t(combn(races, 2))
+for (i in 1:nrow(rac)) {
+    race1 <- rac[i, 1]
+    race2 <- rac[i, 2]
+  #  print(race2)
+    df_one <- df %>% filter(Race == race1) %>% group_by(APR.Risk.of.Mortality) %>% summarise(one_total_count=n())
+    df_two <- df %>% filter(Race == race2) %>% group_by(APR.Risk.of.Mortality) %>% summarise(two_total_count=n())
+    frame <- cbind(race1 = df_one$one_total_count, race2 = df_two$two_total_count)
+    cat("------------------------\n")
+    cat(sprintf("Comparing %s with %s", race1, race2))
+    cat("\nCounts are:\n")
+    print(frame)
+    result <- chisq.test(frame)
+    print(result)
+}
+```
+
+
+Кореляції
+```{r}
+names <- c("Age.Group", "Total.Charges", "APR.Risk.of.Mortality",
+                    "Length.of.Stay", "APR.Severity.of.Illness.Code")
+df_subset <- df[, names]
+
+df_subset$Age.Group <- as.numeric(as.factor(df_subset$Age.Group))
+df_subset <- df_subset %>%
+  mutate(APR.Risk.of.Mortality = recode(APR.Risk.of.Mortality, 
+                                        "Minor" = 1, 
+                                        "Moderate" = 2,
+                                        "Major" = 3,
+                                        "Extreme" = 4))
+ggcorr(df_subset, label = TRUE)
+
+for (i in 1:(length(names)-1)) {
+  element_1 <- names[i]
+  for (j in i:(length(names)-1)) {
+    element_2 <- names[j+1]
+    print(paste(element_1, element_2))
+
+    data <- data.frame(x=df_subset[[element_1]], y=df_subset[[element_2]])
+
+    correlation_function <- function(data, indices, estimate_var = TRUE){
+     sample_data <- data[indices, ]
+     cor_value <- cor(sample_data$x, sample_data$y, method = "pearson")
+
+      if (estimate_var){
+       boot_out <- boot(data[indices, ], statistic = correlation_function,
+                          R = 10, estimate_var = FALSE)
+       return(c(cor_value, var(boot_out$t[, 1])))
+     }
+     else {
+       return(cor_value)
+     }
+    }
+
+    set.seed(42)
+    bootstrap_results <- boot(data, statistic = correlation_function, R = 10)
+    print(bootstrap_results)
+    normal <- boot.ci(bootstrap_results, type = "norm")
+    basic <- boot.ci(bootstrap_results, type = "basic")
+    percentile <- boot.ci(bootstrap_results, type = "perc")
+
+    stud <- boot.ci(bootstrap_results, index=c(1,2), type = "stud")
+
+    print("Normal confidence interval:")
+    print(normal)
+    print("Basic confidence interval:")
+    print(basic)
+    print("Percentile confidence interval:")
+    print(percentile)
+    print("Studentized confidence interval:")
+    print(stud)
+
+  }
+}
+
+
+cor_matrix <- cor(df_subset)
+```
+
+
+ЛАБА 3
+
+
+Регресійна модель
+```{r}
+df_lab3 <- df %>%
+  mutate(APR.Risk.of.Mortality = dplyr::recode(APR.Risk.of.Mortality, 
+                                              "Minor" = 1, 
+                                              "Moderate" = 2,
+                                              "Major" = 3,
+                                              "Extreme" = 4))
+
+df_lab3 <- df_lab3[c("APR.Risk.of.Mortality", "APR.Severity.of.Illness.Code",
+                     "Length.of.Stay", "Age.Group", "Race", "Gender",
+                     "Total.Charges")]
+
+df_lab3 <- df_lab3 %>%
+  mutate(Gender = dplyr::recode(Gender, "M" = 0, "F" = 1))
+
+
+
+# Побудова лінійної регресійної моделі
+model <- lm(Total.Charges ~ Length.of.Stay, data = df_lab3)
+
+model_hc1 <- coeftest(model, vcov. = hccm(model, type = "hc1"))
+
+# stargazer(model_hc1, type = "text", digits = 3)
+summary(model)
+
+
+model_1 <- lm(Total.Charges ~ Length.of.Stay + APR.Severity.of.Illness.Code, data = df_lab3)
+model_hc1_1 <- coeftest(model_1, vcov. = hccm(model_1, type = "hc1"))
+
+# stargazer(model_hc1, model_hc1_1, type = "text", digits = 3)
+
+model_2 <- lm(Total.Charges ~ Length.of.Stay + APR.Severity.of.Illness.Code
+              + Gender, data = df_lab3)
+model_hc1_2 <- coeftest(model_2, vcov. = hccm(model_2, type = "hc1"))
+
+# stargazer(model_hc1_1, model_hc1_2, type = "text", digits = 3)
+cov(df_lab3$Length.of.Stay, df_lab3$APR.Severity.of.Illness.Code)
+var(df_lab3$Length.of.Stay)
+cov(df_lab3$Length.of.Stay, df_lab3$APR.Severity.of.Illness.Code) / var(df_lab3$Length.of.Stay)
+
+# Виведення результатів
+# summary(model)
+
+
+
+
+# Визначення спостережених значень та прогнозованих значень
+# observed <- df$Total.Charges
+# predicted <- predict(model)
+# 
+# # Графік спостережених значень та прогнозованих значень
+# plot(observed, predicted, main = "Графік спостережених та прогнозованих значень", xlab = "Спостережені", ylab = "Прогнозовані")
+
+
+```

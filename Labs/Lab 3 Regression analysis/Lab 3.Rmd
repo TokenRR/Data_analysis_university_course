@@ -1,0 +1,511 @@
+
+Завантажуємо бібліотеки (розкоментувати тільки при першому запуску)
+```{r}
+# install.packages("dplyr") # для оператора %>%
+# install.packages("tidyr") # для drop_na
+# install.packages("ggplot2") # для візуалізації
+# install.packages("cowplot") # для об'єднання графіків в один
+# install.packages("reshape2") # для форматування таблиць
+# install.packages("GGally") # каралелограма
+# install.packages("stargazer")
+# install.packages("lmtest")
+# install.packages("car")
+# install.packages("Hmisc")
+# install.packages("ggcorrplot")
+```
+
+
+Підключаємо бібліотеки
+```{r}
+library(dplyr)
+library(tidyr) 
+library(ggplot2)
+library(cowplot)
+library(reshape2)
+library(GGally)
+library(boot)
+library(stargazer)
+library(lmtest)
+library(car)
+library(Hmisc)
+library(ggcorrplot)
+```
+
+
+ПОЧАТКОВИЙ ЗАПУСК
+Загальні налаштування
+```{r}
+# --- Загальні налаштування ---
+
+# Тема для графіків
+theme_set(theme_minimal())
+
+label_size = 15     # axis labels
+subTitle_size = 20  # subtitle and axis title
+title_size = 25     # main title
+
+# --- Завантажимо наш датасет ---
+
+hos_df = read.csv('Hospital_Inpatient_Discharges__SPARCS_De-Identified___2015.csv', 
+                  na.strings = c("", "Na", "NA", "NULL", "Nan"))
+# na.string() замінює рядкове 'пусте' значення на Na значеня у мові R
+print('Датасет успішно завантажено')
+
+# --- Видалимо 'Номер ліцензії іншого постачальника', оскільки майже 2/3 цих рядків мають значення Na.
+# Також видалимо інші стовпці зі значною кількістю Na, оскільки з них буде важко отримати значення ---
+
+df = hos_df[,!names(hos_df) %in% c('Other.Provider.License.Number',
+                                   'Payment.Typology.2',
+                                   'Payment.Typology.3',
+                                   'Operating.Provider.License.Number')]
+
+# --- Удаляємо ще інше ---
+
+df <- df %>% drop_na()
+
+# --- Видалення пацієнтів з невизначеною статтю ---
+
+df <- df[!df$Gender=="U",]
+
+# --- Приведення до numeric колокти Length.of.Stay , Total.Charges , Total.Costs ---
+
+# Якщо пацієнт лежав в лікарні більше 120 днів, запишемо їх значення перебування як 121
+df["Length.of.Stay"][df["Length.of.Stay"] == "120 +"] <- "121"
+df <- transform(df, Length.of.Stay = as.numeric(Length.of.Stay))
+
+# Перетворюємо ціну у числовий формат
+df$Total.Charges <- as.numeric(gsub("\\$", "", df$Total.Charges))
+df$Total.Costs <- as.numeric(gsub("\\$", "", df$Total.Costs))
+
+
+# --- Для адекватного розрахунку характеристик колонки Birth.Weight замінимо значення 0 на NA. Ці значення не видалятимемо, бо вони є абсолютно адекватними для випадків, що не є пологами. ---
+
+df$Birth.Weight <- ifelse(df$Birth.Weight == 0, NA, df$Birth.Weight)
+
+```
+
+
+Підготовка даних, які будуть використані у регресійній моделі
+```{r}
+df_lab3 <- df %>%
+  mutate(APR.Risk.of.Mortality = dplyr::recode(APR.Risk.of.Mortality, 
+                                              "Minor" = 1, 
+                                              "Moderate" = 2,
+                                              "Major" = 3,
+                                              "Extreme" = 4))
+
+df_lab3 <- df_lab3[c("APR.Risk.of.Mortality", "APR.Severity.of.Illness.Code",
+                     "Length.of.Stay", "Age.Group", "Race", "Gender",
+                     "Total.Charges", "APR.MDC.Code")]
+
+df_lab3 <- df_lab3 %>%
+  mutate(is.Female = dplyr::recode(Gender, "M" = 0, "F" = 1))
+
+df_lab3$Total.Charges.log <- log(df_lab3$Total.Charges)
+df_lab3$Lenght.of.Stay.Censor <- ifelse(df_lab3$Length.of.Stay == 121, 1, 0)
+
+df_lab3 <- df_lab3 %>%
+  mutate(Age.Group.0.17 = ifelse(Age.Group == "0 to 17", 1, 0),
+         Age.Group.18.29 = ifelse(Age.Group == "18 to 29", 1, 0),
+         Age.Group.30.49 = ifelse(Age.Group == "30 to 49", 1, 0),
+         Age.Group.50.69 = ifelse(Age.Group == "50 to 69", 1, 0),
+         Age.Group.70 = ifelse(Age.Group == "70 or Older", 1, 0))
+
+df_lab3 <- df_lab3 %>%
+  mutate(Race.Black = ifelse(Race == "Black/African American", 1, 0),
+         Race.Multi = ifelse(Race == "Multi-racial", 1, 0),
+         Race.Other = ifelse(Race == "Other Race", 1, 0),
+         Race.White = ifelse(Race == "White", 1, 0))
+
+df_lab3 <- df_lab3 %>%
+  mutate(APR.MDC.Nervous = ifelse(APR.MDC.Code == 1, 1, 0),
+         APR.MDC.Eye = ifelse(APR.MDC.Code == 2, 1, 0),
+         APR.MDC.ENMT = ifelse(APR.MDC.Code == 3, 1, 0),
+         APR.MDC.Respiratory = ifelse(APR.MDC.Code == 4, 1, 0),
+         APR.MDC.Circulatory = ifelse(APR.MDC.Code == 5, 1, 0),
+         APR.MDC.Digestive = ifelse(APR.MDC.Code == 6, 1, 0),
+         APR.MDC.Hepatobiliary = ifelse(APR.MDC.Code == 7, 1, 0),
+         APR.MDC.Musculoskeletal = ifelse(APR.MDC.Code == 8, 1, 0),
+         APR.MDC.Skin.Breast = ifelse(APR.MDC.Code == 9, 1, 0),
+         APR.MDC.Endocrine = ifelse(APR.MDC.Code == 10, 1, 0),
+         APR.MDC.Kidney = ifelse(APR.MDC.Code == 11, 1, 0),
+         APR.MDC.Male = ifelse(APR.MDC.Code == 12, 1, 0),
+         APR.MDC.Female = ifelse(APR.MDC.Code == 13, 1, 0),
+         APR.MDC.Pregnancy = ifelse(APR.MDC.Code == 14, 1, 0),
+         APR.MDC.Neonates = ifelse(APR.MDC.Code == 15, 1, 0),
+         APR.MDC.Blood = ifelse(APR.MDC.Code == 16, 1, 0),
+         APR.MDC.Neoplasms = ifelse(APR.MDC.Code == 17, 1, 0),
+         APR.MDC.Infections = ifelse(APR.MDC.Code == 18, 1, 0),
+         APR.MDC.Mental = ifelse(APR.MDC.Code == 19, 1, 0),
+         APR.MDC.Drug = ifelse(APR.MDC.Code == 20, 1, 0),
+         APR.MDC.Injuries.Poison = ifelse(APR.MDC.Code == 21, 1, 0),
+         APR.MDC.Burns = ifelse(APR.MDC.Code == 22, 1, 0),
+         APR.MDC.Not.Sick = ifelse(APR.MDC.Code == 23, 1, 0),
+         APR.MDC.Trauma = ifelse(APR.MDC.Code == 24, 1, 0),
+         APR.MDC.HIVI = ifelse(APR.MDC.Code == 25, 1, 0))
+
+# APR.MDC.Nervous + APR.MDC.Eye + APR.MDC.ENMT + APR.MDC.Respiratory + 
+# APR.MDC.Circulatory + APR.MDC.Digestive + APR.MDC.Hepatobiliary + 
+# APR.MDC.Musculoskeletal + APR.MDC.Skin.Breast + APR.MDC.Endocrine +
+# APR.MDC.Kidney + APR.MDC.Kidney + APR.MDC.Male + APR.MDC.Female +
+# APR.MDC.Pregnancy + APR.MDC.Neonates + APR.MDC.Blood + APR.MDC.Neoplasms +
+# APR.MDC.Infections + APR.MDC.Mental + APR.MDC.Drug + APR.MDC.Injuries.Poison + APR.MDC.Burns +
+# APR.MDC.Not.Sick + APR.MDC.Trauma + APR.MDC.HIVI
+```
+
+
+Гістограма ціни
+```{r}
+# Розділення колонки на 20 інтервалів
+intervals <- cut(df_lab3$Total.Charges, breaks = 50)
+
+# Підрахунок кількості входжень в кожен інтервал
+counts <- table(intervals)
+
+# Побудова гістограми з кількістю входжень
+barplot(counts, main = "Гістограма", xlab = "Ціна", ylab = "Кількість")
+```
+
+
+Модель тільки від довжини перебування
+```{r}
+# Побудова лінійної регресійної моделі
+model <- lm(Total.Charges.log ~ Length.of.Stay, data = df_lab3)
+
+model_hc1 <- coeftest(model, vcov. = hccm(model, type = "hc1"))
+
+stargazer(model_hc1, type = "text", digits = 3)
+summary(model)
+```
+
+
+Побудова лінійної регресійної моделі з різними хворобами
+```{r}
+model <- lm(Total.Charges.log ~ Length.of.Stay, data = df_lab3)
+
+model_hc1 <- coeftest(model, vcov. = hccm(model, type = "hc1"))
+
+model_diagnosis <- lm(Total.Charges.log ~ Length.of.Stay + APR.MDC.Nervous + APR.MDC.Eye + APR.MDC.ENMT + APR.MDC.Respiratory + 
+                            APR.MDC.Circulatory + APR.MDC.Digestive + APR.MDC.Hepatobiliary + 
+                            APR.MDC.Musculoskeletal + APR.MDC.Skin.Breast + APR.MDC.Endocrine +
+                            APR.MDC.Kidney + APR.MDC.Kidney + APR.MDC.Male + APR.MDC.Female +
+                            APR.MDC.Pregnancy + APR.MDC.Neonates + APR.MDC.Blood + APR.MDC.Neoplasms +
+                            APR.MDC.Infections + APR.MDC.Mental + APR.MDC.Drug + APR.MDC.Injuries.Poison + APR.MDC.Burns +
+                            APR.MDC.Not.Sick + APR.MDC.Trauma, data = df_lab3)
+
+model_hc1_diagnosis <- coeftest(model_diagnosis, vcov. = hccm(model_diagnosis, type = "hc1"))
+
+stargazer(model, model_diagnosis, type = "latex",
+          title = "Множинна регресія", label = "table:evals-reg-mult",
+          dep.var.labels = c("Середня оцінка"),
+          dep.var.caption = "",
+          se = list(model_hc1[, 2], model_hc1_diagnosis[, 2]),
+          omit.stat = c("rsq", "f", "ser"),
+          no.space = TRUE,
+          font.size = "tiny",
+          out="Порівняння доцільності врахування діагнозів.html"
+          )
+summary(model)
+```
+
+
+Гіпотеза що вид хвороби не впливає
+```{r}
+linearHypothesis(model, c("APR.MDC.Nervous = 0", "APR.MDC.Eye = 0", "APR.MDC.ENMT = 0", "APR.MDC.Respiratory = 0", 
+                              "APR.MDC.Circulatory = 0", "APR.MDC.Digestive = 0", "APR.MDC.Hepatobiliary = 0", 
+                              "APR.MDC.Musculoskeletal = 0", "APR.MDC.Skin.Breast = 0", "APR.MDC.Endocrine = 0",
+                              "APR.MDC.Kidney = 0", "APR.MDC.Kidney = 0", "APR.MDC.Male = 0", "APR.MDC.Female = 0",
+                              "APR.MDC.Pregnancy = 0", "APR.MDC.Neonates = 0", "APR.MDC.Blood = 0", "APR.MDC.Neoplasms = 0",
+                              "APR.MDC.Infections = 0", "APR.MDC.Mental = 0", "APR.MDC.Drug = 0", "APR.MDC.Injuries.Poison = 0", "APR.MDC.Burns = 0",
+                              "APR.MDC.Not.Sick = 0", "APR.MDC.Trauma = 0"), 
+                 vcov = hccm(model, type = "hc1"))
+```
+
+
+Графіки довірчих інтревалів для формулювання гіпотез про знаки коефіцієнтів
+```{r}
+# Побудова графіка з обмеженими мітками на осі X
+
+# "APR.Risk.of.Mortality", "APR.Severity.of.Illness.Code", "Length.of.Stay", "Age.Group", "Race", "Gender"
+
+# ggplot(df_lab3, aes(x = APR.Risk.of.Mortality, y = Total.Charges)) +
+# stat_summary(fun = "mean", geom = "point", color = "blue", size = 3) +
+# stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", color = "red", width = 0.2)
+
+
+# ggplot(df_lab3, aes(x = APR.Severity.of.Illness.Code, y = Total.Charges)) +
+# stat_summary(fun = "mean", geom = "point", color = "blue", size = 3) +
+# stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", color = "red", width = 0.2)
+
+
+ggplot(df_lab3, aes(x = Length.of.Stay, y = Total.Charges.log)) + geom_point()
+
+# stat_summary(fun = "mean", geom = "point", color = "blue", size = 3) +
+# stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", color = "red", width = 0.2)
+
+
+# ggplot(df_lab3, aes(x = Age.Group, y = Total.Charges)) +
+# stat_summary(fun = "mean", geom = "point", color = "blue", size = 3) +
+# stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", color = "red", width = 0.2)
+
+
+# ggplot(df_lab3, aes(x = Race, y = Total.Charges)) +
+# stat_summary(fun = "mean", geom = "point", color = "blue", size = 3) +
+# stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", color = "red", width = 0.2)
+
+
+# ggplot(df_lab3, aes(x = Gender, y = Total.Charges)) +
+# stat_summary(fun = "mean", geom = "point", color = "blue", size = 3) +
+# stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", color = "red", width = 0.2)
+
+ggplot(df_lab3, aes(x = APR.MDC.Code, y = Total.Charges)) +
+stat_summary(fun = "mean", geom = "point", color = "blue", size = 3) +
+stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", color = "red", width = 0.2)
+
+table(df_lab3$Race)
+```
+
+
+Модель з контрольними змінними (1-3)
+```{r}
+model_1 <- lm(Total.Charges.log ~ Length.of.Stay, data = df_lab3)
+model_1_hc1 <- coeftest(model_1, vcov. = hccm(model_1, type = "hc1"))
+ci_1 <- coefci(model_1, vcov. = hccm(model_1, type = "hc1"))
+
+model_2 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor, data = df_lab3)
+model_2_hc1 <- coeftest(model_2, vcov. = hccm(model_2, type = "hc1"))
+ci_2 <- coefci(model_2, vcov. = hccm(model_2, type = "hc1"))
+
+model_3 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + 
+                 is.Female, data = df_lab3)
+model_3_hc1 <- coeftest(model_3, vcov. = hccm(model_3, type = "hc1"))
+ci_3 <- coefci(model_3, vcov. = hccm(model_3, type = "hc1"))
+ 
+# model_4 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor +
+#                                    Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70,
+#             data = df_lab3)
+# model_4_hc1 <- coeftest(model_4, vcov. = hccm(model_4, type = "hc1"))
+ # ci_4 <- coefci(model_4, vcov. = hccm(model_4, type = "hc1"))
+ 
+# model_7 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + is.Female + APR.Risk.of.Mortality +
+#                                    Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 +
+#                                    Race.Black + Race.Other+ Race.White,
+#             data = df_lab3)
+# model_7_hc1 <- coeftest(model_7, vcov. = hccm(model_7, type = "hc1"))
+ # ci_7 <- coefci(model_7, vcov. = hccm(model_7, type = "hc1"))
+
+
+stargazer(model_1, model_2, model_3, type = "latex",
+          title = "Множинна регресія", label = "table:evals-reg-mult",
+          dep.var.labels = c("Середня оцінка"),
+          dep.var.caption = "",
+          se = list(model_1_hc1[, 2], model_2_hc1[, 2], model_3_hc1[, 2]),
+          omit.stat = c("rsq", "f", "ser"),
+          no.space = TRUE,
+          font.size = "tiny", 
+          out="Модель із контрольними змінними 1-3.html")
+
+```
+
+
+Модель з контрольними змінними (4-6)
+```{r}
+model_4 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor +
+                                   Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70,
+            data = df_lab3)
+model_4_hc1 <- coeftest(model_4, vcov. = hccm(model_4, type = "hc1"))
+# ci_4 <- coefci(model_4, vcov. = hccm(model_4, type = "hc1"))
+
+model_5 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor +
+                                   Race.Black + Race.Other + Race.Multi,
+            data = df_lab3)
+model_5_hc1 <- coeftest(model_5, vcov. = hccm(model_5, type = "hc1"))
+# ci_5 <- coefci(model_4, vcov. = hccm(model_5, type = "hc1"))
+
+model_6 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + 
+              APR.Risk.of.Mortality + Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 +
+              Race.Black + Race.Other+ Race.Multi,
+              data = df_lab3)
+model_6_hc1 <- coeftest(model_6, vcov. = hccm(model_6, type = "hc1"))
+# ci_6 <- coefci(model_6, vcov. = hccm(model_6, type = "hc1"))
+ 
+stargazer(model_4, model_5, model_6, type = "latex",
+          title = "Множинна регресія", label = "table:evals-reg-mult",
+          dep.var.labels = c("Середня оцінка"),
+          dep.var.caption = "",
+          se = list(model_4_hc1[, 2], model_5_hc1[, 2], model_6_hc1[, 2]),
+          omit.stat = c("rsq", "f", "ser"),
+          no.space = TRUE,
+          font.size = "tiny", 
+          out="Модель із контрольними змінними 4-6.html")
+
+```
+
+
+Модель з контрольними змінними (абсолютно всі змінні)
+```{r}
+model_7 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + is.Female + APR.Risk.of.Mortality +
+                                   Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 +
+                                   Race.Black + Race.Other+ Race.Multi,
+            data = df_lab3)
+model_7_hc1 <- coeftest(model_7, vcov. = hccm(model_7, type = "hc1"))
+# ci_7 <- coefci(model_7, vcov. = hccm(model_7, type = "hc1"))
+
+stargazer(model_7, type = "latex",
+          title = "Множинна регресія", label = "table:evals-reg-mult",
+          dep.var.labels = c("Середня оцінка"),
+          dep.var.caption = "",
+          se = list(model_7_hc1[, 2]),
+          omit.stat = c("rsq", "f", "ser"),
+          no.space = TRUE,
+          font.size = "tiny", 
+          out="Модель із контрольними змінними 7.html")
+```
+
+
+Графік з крапочками (scatterplot)
+```{r}
+ggplot(df_lab3, aes(x = Length.of.Stay, y = Total.Charges.log)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  geom_smooth(method = "lm", formula = y ~ I(log(x)), se = FALSE, color = "green") +
+  labs(x = "Довжина перебування", y = "log(Ціна)")
+
+```
+
+
+```{r}
+ggcorr(df_lab3 %>% dplyr::select(Total.Charges.log, Length.of.Stay, APR.Severity.of.Illness.Code,
+                                 Age.Group.0.17, Age.Group.18.29, Age.Group.30.49, Age.Group.50.69, Age.Group.70,
+                                 Race.Black, Race.Multi, Race.Other, Race.White, is.Female, APR.Risk.of.Mortality, 
+                                 APR.MDC.Nervous, APR.MDC.Eye, APR.MDC.ENMT, APR.MDC.Respiratory, 
+                                 APR.MDC.Circulatory, APR.MDC.Digestive, APR.MDC.Hepatobiliary,
+                                 APR.MDC.Musculoskeletal, APR.MDC.Skin.Breast, APR.MDC.Endocrine,
+                                 APR.MDC.Kidney, APR.MDC.Kidney, APR.MDC.Male, APR.MDC.Female,
+                                 APR.MDC.Pregnancy, APR.MDC.Neonates, APR.MDC.Blood, APR.MDC.Neoplasms,
+                                 APR.MDC.Infections, APR.MDC.Mental, APR.MDC.Drug, APR.MDC.Injuries.Poison, APR.MDC.Burns,
+                                 APR.MDC.Not.Sick, APR.MDC.Trauma), label = TRUE)
+
+```
+
+
+Логарифм довжини перебування
+```{r}
+model_3 <- lm(Total.Charges.log ~ I(log(Length.of.Stay)) + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + APR.Risk.of.Mortality +
+                                  Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 +
+                                  Race.Black + Race.Other+ Race.Multi,
+            data = df_lab3)
+model_3_hc1 <- coeftest(model_3, vcov. = hccm(model_3, type = "hc1"))
+
+ci_3 <- coefci(model_3, vcov. = hccm(model_3, type = "hc1"))
+
+
+stargazer(model_3, type = "latex",
+          title = "Множинна регресія", label = "table:evals-reg-mult",
+          dep.var.labels = c("Середня оцінка"),
+          dep.var.caption = "",
+          se = list(model_3_hc1[, 2]),
+          omit.stat = c("rsq", "f", "ser"),
+          no.space = TRUE,
+          font.size = "tiny",
+          out = "Log-log модель залежності.html"
+)
+linearHypothesis(model_3, c("I(log(Length.of.Stay)) =0"),
+                 vcov = hccm(model_3, type = "hc1"))
+```
+
+
+Квадрат довжини перебування
+```{r}
+model_3 <- lm(Total.Charges.log ~ I(Length.of.Stay^2) + Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + APR.Risk.of.Mortality +
+                                  Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 +
+                                  Race.Black + Race.Other+ Race.Multi,
+            data = df_lab3)
+model_3_hc1 <- coeftest(model_3, vcov. = hccm(model_3, type = "hc1"))
+
+# ci_3 <- coefci(model_3, vcov. = hccm(model_3, type = "hc1"))
+
+
+stargazer(model_3, type = "latex",
+          title = "Множинна регресія", label = "table:evals-reg-mult",
+          dep.var.labels = c("Середня оцінка"),
+          dep.var.caption = "",
+          se = list(model_3_hc1[, 2]),
+          omit.stat = c("rsq", "f", "ser"),
+          no.space = TRUE,
+          font.size = "tiny",
+          out = "Log-квадрат модель залежності.html"
+          )
+linearHypothesis(model_3, c("Length.of.Stay =0", "I(Length.of.Stay^2) = 0"),
+                 vcov = hccm(model_3, type = "hc1"))
+```
+
+
+Квадрат логарифму довжини перебування
+```{r}
+model_3 <- lm(Total.Charges.log ~ I(log(Length.of.Stay)^2) + I(log(Length.of.Stay)) + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + APR.Risk.of.Mortality +
+                                  Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 +
+                                  Race.Black + Race.Other+ Race.Multi,
+            data = df_lab3)
+model_3_hc1 <- coeftest(model_3, vcov. = hccm(model_3, type = "hc1"))
+
+# ci_3 <- coefci(model_3, vcov. = hccm(model_3, type = "hc1"))
+
+
+stargazer(model_3, type = "latex",
+          title = "Множинна регресія", label = "table:evals-reg-mult",
+          dep.var.labels = c("Середня оцінка"),
+          dep.var.caption = "",
+          se = list(model_3_hc1[, 2]),
+          omit.stat = c("rsq", "f", "ser"),
+          no.space = TRUE,
+          font.size = "tiny",
+          out = "Log-log^2 модель залежності.html"
+          )
+linearHypothesis(model_3, c("I(log(Length.of.Stay)) =0", "I(log(Length.of.Stay)^2) = 0"),
+                 vcov = hccm(model_3, type = "hc1"))
+```
+
+
+Перевірка на значущість групи коефіцієнтів (Age.Group)
+```{r}
+# Модель з окремими коефіцієнтами Age.Group
+model_1 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + is.Female + APR.Risk.of.Mortality + Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 + Race.Black + Race.Other+ Race.White,
+            data = df_lab3)
+
+# # Модель без окремих коефіцієнтів Age.Group
+# model_2 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + is.Female + APR.Risk.of.Mortality + Race.Black + Race.Other+ Race.White,
+#             data = df_lab3)
+# # Порівняння моделей
+# model_comparison <- anova(model_1, model_2)
+# 
+# model_comparison
+linearHypothesis(model_1, c("Age.Group.0.17 = 0", "Age.Group.30.49 = 0", "Age.Group.50.69 = 0", "Age.Group.70 = 0"),
+                 vcov = hccm(model_1, type = "hc1"))
+```
+
+
+Перевірка на значущість групи коефіцієнтів (Race)
+```{r}
+# Модель з окремими коефіцієнтами Age.Group
+model_1 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + is.Female + APR.Risk.of.Mortality + Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70 + Race.Black + Race.Other+ Race.Multi,
+            data = df_lab3)
+
+# # Модель без окремих коефіцієнтів Age.Group
+# model_2 <- lm(Total.Charges.log ~ Length.of.Stay + Lenght.of.Stay.Censor + APR.Severity.of.Illness.Code + is.Female + APR.Risk.of.Mortality + Age.Group.0.17 + Age.Group.30.49 + Age.Group.50.69 + Age.Group.70,
+#             data = df_lab3)
+# # Порівняння моделей
+# model_comparison <- anova(model_1, model_2)
+# 
+# model_comparison
+
+linearHypothesis(model_1, c("Race.Black = 0", "Race.Other = 0", "Race.Multi = 0"),
+                 vcov = hccm(model_1, type = "hc1"))
+```
+
+
+
+
+
+
+
