@@ -1,0 +1,2070 @@
+---
+title: "Лекція 3. Статистичне виведення в R. Загальні принципи"
+author: "Данило Тавров"
+date: "`r Sys.Date()`"
+output:
+  beamer_presentation:
+    theme: Madrid
+    toc: false
+    colortheme: "seahorse"
+    fonttheme: serif
+    latex_engine: xelatex
+    includes:
+      in_header: "../latex/preamble.tex"
+    highlight: tango
+    incremental: true
+    dev: cairo_pdf
+fontsize: 9pt
+urlcolor: blue
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(latex2exp)
+library(ggtext)
+```
+
+# Поняття про статистичне виведення
+
+## Вступні зауваги
+
+- Найближчі дві лекції ми присвятимо пригадуванню основних відомостей із теорії ймовірностей та статистики
+
+- Сьогодні ми згадаємо основні поняття з теорії ймовірностей та подивимося, як їх реалізовано в R
+
+- Корисними матеріалами є:
+    + Мій конспект лекцій із «Теорії ймовірностей» (викладено на диску в каталозі з Лекцією 3)
+    + Фундаментальна книжка *All of Statistics*, розділи 1--4 (викладено на диску в загальному каталозі з літературою)
+
+
+## Базові поняття
+
+- Під **статистичним виведенням** (statistical inference) будемо розуміти процес формування висновків про **популяцію**^[Також побутує поняття «генеральна сукупність», але ми ним користуватися не будемо] (population) на основі деякої **вибірки** (sample)
+    + Популяція містить повний набір даних про всі можливі спостереження
+    + Вибірка є підмножиною популяції
+
+- Маючи на руках дані певної вибірки, ми намагаємося з'ясувати, яка **ймовірнісна модель** (probability model, або ще кажуть **data generating process**, DGP) ці дані породила
+    + У термінах теорії ймовірностей, нас цікавить **спільний розподіл** (joint probability distribution) усіх випадкових величин із вибірки
+
+- **Параметром** (parameter) модели є деяка її числова характеристика
+
+- **Статистикою** (statistic) є функція від даних, яка описує вибірку
+
+- Ми хочемо використати підраховані статистики для **виведення** (to infer) знання про параметри популяції
+
+## Базові поняття
+
+- Зв'язок між теорією ймовірностей і статистичним виведенням:
+```{r, indent = "    ", echo = FALSE, out.width = '50%', fig.align = 'center', fig.cap = 'Імовірність і виведення (Wasserman, p. ix)'}
+knitr::include_graphics('images/wasserman1.png')
+```
+
+- Теорія ймовірностей є формальною мовою невизначености
+
+- У теорії ймовірностей ми намагаємося відповісти на питання: «Якщо ми знаємо DGP, які є властивості згенерованих даних?»
+
+- У статистичному виведенні ми намагаємося відповісти на питання: «Якщо ми знаємо дані, що можна сказати про DGP, який їх згенерував?»
+
+- Фактично статистичним виведенням значною мірою є й те, що називають data analysis, machine learning і data mining
+
+- До статистичного виведення в широкому сенсі можна віднести як інференційний аналіз, так і прогнозний, і причиново-наслідковий
+
+- Адже як для прогнозування, так і для встановлення причиново-наслідкових зв'язків потрібно знати характеристики DGP
+
+## Зв'язок між статистикою і машинним навчанням
+
+> І статистика, і data mining, і machine learning пов'язані зі збором та аналізом даних. Протягом певного часу статистичні дослідження виконувалися на кафедрах статистики, а data mining і machine learning досліджувалися на кафедрах комп'ютерних наук. Статистики вважали, що комп'ютерники винаходять велосипед. Комп'ютерники вважали, що статистична теорія не розв'язує їхніх задач. (Wasserman, p. vii)
+
+
+## Приклади
+
+- Як рівень мінімальної зарплати впливає на безробіття?
+
+- Який зв'язок між освітою та доходами?
+
+- Чи зменшується розмір мозку від недосипання?
+
+- Чи є собаки, яких вигулюють чоловіки, агресивніші?
+
+- Які висновки можна зробити на основі соціологічного опитування?
+
+- Які ділянки мозку відповідають за певні активності?
+
+- Чи є ліки ефективні?
+
+## Виведення на основі даних спостережень
+
+- В ідеалі ми воліли би провести **експеримент** (experiment) і зібрати всі потрібні дані
+
+- Проте на практиці це можливо тільки в окремих випадках і в окремих галузях (медицині, біостатистиці, дуже обмежено в економіці тощо)
+
+- У нашому курсі ми **не будемо** займатися питання розроблення експериментів
+
+- Ми працюватимемо з **даними спостережень** (observational data)
+
+- Вибірка, із якою ми працюємо, може викликати питання:
+    + Чи є вибірка **репрезентативною** (representative) для популяції?
+    + Чи наявні в даних спостереження відібрано з однаковою ймовірністю?
+    + Які існують додаткові змінні (відомі і наявні; відомі, але **не** наявні; **не** відомі і **не** наявні), які можуть спотворити наші висновки?
+    + Який вплив мають пропущені дані?
+    + І т.д.
+
+- Виконуючи статистичне виведення, потрібно завжди робити певні **припущення** (assumptions) і правильно їх мотивувати
+
+## Два різні підходи до статистичного виведення
+
+- Згідно з **частотним підходом** (frequentist approach), імовірність деякої події --- це гранична частота настання події за умови нескінченного повторювання одного й того ж експерименту
+
+- Відтак **частотне виведення** (frequentist inference) слідує цій інтерпретації для оцінювання параметрів та керування похибками
+
+- Згідно з **Беєсівським підходом** (Bayesian approach), імовірність являє собою **ступінь упевнености** (belief) у настанні деякої події
+
+- Відтак **Беєсівське виведення** (Bayesian inference) слідує цій інтерпретації та розглядає всі невідомі параметри моделей як випадкові
+
+- У нашому курсі розглянемо обидва підходи
+
+
+# Основні поняття теорії ймовірностей
+
+## Дисклеймер
+
+- Ми коротко згадаємо основні визначення та властивості
+
+- Ви це вже все знаєте з попередніх курсів
+
+- Детальнішу інформацію можна почитати в конспекті лекцій з «Теорії ймовірностей» на диску (КЛТЙ)
+
+- Якщо щось незрозуміло чи не пам'ятаєте --- відразу заповнюйте прогалини
+
+## Вимірний простір
+
+\vspace{-0.5cm}
+
+\begin{defn}<+->
+    \label{defn:samplespace}
+\begin{itemize}[<+->]
+    \item
+ \textbf{Простір елементарних подій} (sample space) $\Omega$ для деякого випадкового експерименту  --- множина всіх можливих його результатів. Може бути:
+    \begin{itemize}
+        \item Скінченний (finite): $|\Omega| < \infty$
+        \item Зліченний (countable): $|\Omega| = \aleph_0$
+        \item Незліченний (uncountable): $|\Omega| = \mathfrak{c}$
+    \end{itemize}
+
+\item Елемент $\omega \in \Omega$ --- \textbf{елементарна подія} (sample)
+
+\item \textbf{Подія}  (event) $A$~--- це деяка підмножина (subset) простору $\Omega$: $A \subseteq \Omega$
+\end{itemize}
+\end{defn}
+
+\vspace{-0.3cm}
+
+- На просторі $\Omega$ ми визначаємо \textbf{$\sigma$-алгебру} $\cA$ --- множину подій, які нас цікавлять^[Деталі можна почитати в КЛТЙ 1.5]
+    + На скінченному й зліченному просторах ми беремо множину всіх підмножин: $\cA = 2^\Omega$
+    + На незліченному просторі (як правило, $\RR$ або $\RR^k$) ми беремо \textbf{Борелеву $\sigma$-алгебру} (Borel $\sigma$-algebra)^[Еміль Борель (Félix Édouard Justin Émile Borel, 1871--1956) --- французький математик] $\cB$ або $\cB^k$
+
+\vspace{-0.3cm}
+
+\begin{defn}<+->
+    \label{defn:measurablespace}
+\begin{itemize}[<+->]
+    \item $\Space$ --- \textbf{вимірний простір} (measurable space)
+    \item Множини в $\sigma$-алгебрі $\cA$ --- \textbf{вимірні множини} (measurable sets)
+\end{itemize}
+\end{defn}
+
+
+## Імовірнісна міра
+
+\begin{defn}
+    \label{defn:measure}
+\begin{itemize}[<+->]
+    \item Функція $\mu: \cA \to \RR$ --- \textbf{міра} (measure), якщо:
+    \begin{itemize}[<+->]
+       \item $\mu(A) \geq 0$ для всіх $A \in \cA$
+       \item $\mu$ є \textbf{$\sigma$-адитивною} ($\sigma$-additive):
+    \begin{equation}
+				\mu\left(\bigcup_{j=1}^\infty A_j\right) = \sum_{j=1}^\infty \mu(A_j)\;, \quad A_j\in\cA\;, \ j = 1, 2, \dots\;, \quad A_i \cap A_j = \emptyset\;, \ i \neq j
+				\label{eq:sigmaadditivity}
+		\end{equation}
+    \end{itemize}
+\end{itemize}
+\end{defn}
+
+- Якщо $\mu(\Omega) = 1$, то $\mu$ називають \textbf{імовірнісною мірою} (probability measure) і позначають через $\PPsym$
+
+- Трійку $\Spaceprob$ називають \textbf{імовірнісним простором} (probability space)
+
+- Деякі властивості ймовірнісної міри:
+    + $\PP{\emptyset} = 0$
+    + $\PP{A} \leq 1$
+    + $\PP{A^c} = 1 - \PP{A}$
+    + $\PP{A \cup B} = \PP{A} + \PP{B} - \PP{A \cap B}$
+    + Якщо $A_1 \subseteq A_2$, то $\PP{A_1} \leq \PP{A_2}$
+
+## Випадкові величини
+
+\begin{defn}<+->
+    \label{defn:rv}
+Дійснозначну\footnotemark  функцію $X: \Omega \to \RR$ називають \textbf{випадковою величиною} (random variable)
+\end{defn}
+\footnotetext{Строго формально, ще й вимірну; див. КЛТЙ 4.1}
+
+- Наприклад, $\Omega$ може містити всіх можливих людей
+
+- Тоді $X: \Omega \to \RR^+$ відповідає зросту кожної людини
+
+- Випадкові величини, як правило, позначаємо великими літерами латинського алфавіту ($X$, $Y$, $Z$ тощо)
+
+- Значення, яких вони набувають --- маленькими ($x$, $y$, $z$ тощо)
+
+## Розподіл випадкової величини
+
+\begin{defn}
+    \label{defn:distribution}
+\begin{itemize}[<+->]
+    \item Випадкова величина $X$ задає на вимірному просторі $\SpaceRR$  ймовірнісну міру
+\begin{equation}
+		\PPX{A} \equiv \PPX{X \in A} = \PP{X^{-1}(A)}\;, \qquad A \in \cB
+		\label{eq:distribution}
+\end{equation}
+    \item Таку міру називають \textbf{розподілом} (distribution) $X$
+    \item Випадкові величини $X$ і $Y$ \textbf{рівні за розподілом} (equal in distribution), $X \eqdist Y$, якщо $\PPX{A} = \PPx{A}{Y}$ для всіх $A\in\cB$
+\end{itemize}
+
+\end{defn}
+
+\visible<+->{
+```{r, echo = FALSE, out.width = '50%', fig.align = 'center'}
+knitr::include_graphics('images/measurable_function_2.png')
+```
+}
+
+## Як рахувати ймовірності з випадковими величинами?
+
+- Нехай маємо випадкову величину $X: \Spaceprob \to \SpaceRR$ з розподілом $\PPsym_X$
+
+- Наприклад, це може бути «вага людини, кг»
+
+- Ми не маємо жодного уявлення про простір $\Spaceprob$, на якому вона визначена
+
+- Ми тільки спостерігаємо значення $X$
+
+- Нас цікавить обчислити ймовірність, наприклад, події $X > 100$
+
+- За \eqref{eq:distribution} ми повинні порахувати $\PPX{X > 100} = \PP{X^{-1}(100; \infty)}$
+
+- Без знання простору $\Spaceprob$ це зробити просто неможливо
+
+- Тому на практиці використовують такі випадкові величини, розподіл яких можна **легко** характеризувати
+
+## Абсолютно неперервні міри
+
+\vspace{-0.5cm}
+
+\begin{defn}
+    \label{defn:abscontinuousmeasure}
+\begin{itemize}[<+->]
+    \item Нехай на вимірному просторі $\Space$ визначено дві міри, $\mu$ і $\nu$
+    \item Міра $\nu$ є \textbf{абсолютно неперервною відносно $\mu$} (absolutely continuous with respect to $\mu$), що позначають як $\nu \ll \mu$, якщо
+\[
+\forall A\in \cA\;, \ \ \mu(A) = 0 \Rightarrow \nu(A) = 0 \qedhere
+\]
+\end{itemize}
+
+\end{defn}
+
+\vspace{-0.5cm}
+
+\begin{thm}<+->[Теорема Радона-Никодима (Radon–Nikodym theorem)\footnotemark]
+    \label{thm:radon}
+\begin{itemize}[<+->]
+    \item Нехай на вимірному просторі $\Space$ визначено дві ($\sigma$-скінченні) міри $\mu$ і $\nu$, $\nu \ll \mu$
+    \item Тоді існує невід'ємна (вимірна) функція $f: \Omega \to [0; \infty)$ така, що
+			\begin{equation}
+				\nu(A) = \intAdmu{f}{A}\;, \qquad \forall A\in \cA
+				\label{eq:radon}
+			\end{equation}
+\end{itemize}
+
+\end{thm}
+
+
+\footnotetext{Йоганн Карл Август Радон (Johann Karl August Radon, 1887--1956) --- австрійський математик. Отто Марчин Никодим (Otto Marcin Nikodym, 1887--1974) --- польський математик}
+
+## Два основні типи випадкових величин
+
+- На практиці нас цікавлять такі випадкові величини $X$, розподіл яких $\PPsym_X$ абсолютно неперервний відносно деякої міри
+
+- Тоді ймовірність будь-якої події $X \in A$, $A \in \cB$, можна обчислити за допомогою \eqref{eq:radon} як $\PPX{X\in A} = \ds\intAdmu{f}{A}$
+
+1. Випадкова величина $X$ **дискретна**, якщо її образ зліченний, тобто $X \in X_0 = \set{x_1, x_2, \ldots}$
+    + Тоді можна показати, що $\PPsym_X \ll \tthash$
+    + Тут $\tthash$ --- це \textbf{лічна міра} (counting measure): $\tthash(A) = |X_0 \cap A|$, $A \in \cB$
+    + Тоді $\PP{X \in A} = \ds\intAdhash{f}{A} = \sum_{x\in X_0 \cap A} f(x)$
+
+2. Випадкова величина $X$ **неперервна**, якщо її образ незліченний і $\PPsym_X \ll \lambda$
+    + Тут $\lambda$ --- це \textbf{міра Лебега} (Lebesgue measure)^[Анрі Лебег (Henri Lebesgue, 1875--1941) --- французький математик]
+    + Міра Лебега --- \textbf{єдина ($\sigma$-скінченна}^[Це для нашого курсу непринципово; дис. КЛТЙ 2.4]) \textbf{міра, яка має інтерпретацію довжини інтервалу}
+    + Тобто $\lambda((a; b]) = b - a$
+    + Тоді^[На практиці зустрічаються тільки такі величини, де перехід до інтегралу Рімана справді можливий] $\PP{X \in A} = \ds\intAdlambda{f}{A} = \int_A f(x)\, dx$
+
+## Функція ймовірности дискретної випадкової величини
+
+- Отже якщо $X$ дискретна, то $\PPX{X\in A} = \ds \intAdmu{f}{A} = \sum_{x\in X_0 \cap A} f(x)$
+
+- **Носієм** (support) дискретної величини є її образ: $\supp{X} = X_0$
+    + Наприклад, $X$ може відповідати числу дітей у сім'ї, і тоді $\supp{X} = \set{0,1,2, \ldots}$
+    + Або числу гербів після підкидання двох монеток, і тоді $\supp{X} = \set{0, 1, 2}$
+
+\begin{defn}<+->
+    \label{defn:pmf}
+Таку функцію $f$ називають \textbf{функцією ймовірности} (probability mass function) і частіше позначають через $p_X(x) \equiv \PPX{X = x}$
+\end{defn}
+
+- Ця функція дає ймовірність будь-якого елемента носія
+
+- За межами носія $p_X(x) = 0$, $x \notin \supp{X}$
+
+- Також повинно бути справедливим $\ds \sum_{x\in \supp{X}} p_X(x) = 1$
+
+## Щільність розподілу неперервної випадкової величини
+
+- Якщо ж $X$ неперервна, то $\PPX{X\in A} = \ds \intAdlambda{f_X}{A} = \ds \int_A f_X(x)\, dx$
+
+- **Носієм** неперервної величини є $\supp{x} = \set{x\in \RR: f(x) > 0}$
+    + Наприклад, $X$ може відповідати зросту людини, і тоді $\supp{X} = (0; \infty)$
+    + Або частці пацієнтів, що одужали після вживання ліків, і тоді $\supp{X} = [0; 1]$
+
+\begin{defn}<+->
+    \label{defn:pdf}
+Таку функцію $f_X$ називають \textbf{щільністю розподілу} (probability density function, PDF)
+\end{defn}
+
+\begin{thm}<+->
+    \label{thm:densityconditions}
+Будь-яка функція $f: \RR\to [0; \infty)$ є щільністю для деякого розподілу тоді й тільки тоді, коли:
+\begin{itemize}[<+->]
+    \item $f(x) \geq 0$ для всіх $x \in \RR$
+    \item $\ds \int_{-\infty}^\infty f(t)\, dt = 1$
+\end{itemize}
+
+\end{thm}
+
+## Інтерпретація щільности розподілу
+
+- Щільність розподілу дуже подібна до функції ймовірности, проте не зовсім
+
+- Для розподілів із неперервною функцією розподілу $\PPX{X= x} = 0$
+
+- А щільність розподілу --- це ймовірність \textbf{нескінченно малого інтервалу}: $\PPX{X \in (x; x + dx)} = f(x) dx$
+
+\visible<+->{
+```{r, echo = FALSE, out.width = '90%', fig.align = 'center', fig.cap = ''}
+knitr::include_graphics('images/densityillustration.png')
+```
+}
+
+- Щільність $f(x)$ сама по собі \textbf{не є ймовірністю}
+
+- Вона навіть може перевищувати 1
+
+
+## Події міри нуль
+
+- Подію $A$, імовірність якої $\PP{A} = 0$, називають \textbf{подією міри нуль} (measure zero event, null set)
+    + Множинами міри нуль є множини з одного елемента $\set{x}$, $x \in \RR$
+    + Також будь-які зліченні множини ($\NN$, $\ZZ$, парні числа тощо)
+    + В $\RR^k$ це є будь-які множини розмірности $\RR^{k - 1}$ (лінії на площині і т.п.)
+
+- Кажуть, що деяке твердження істинне \textbf{майже напевно} (almost surely, a.s.) або \textbf{з імовірністю 1} (with probability 1, w.p.1), якщо воно **не виконується** на множині міри нуль
+
+- Наприклад, можемо казати, що випадкова величина $X > 0$ майже напевно
+    + Це означає, що вона **може** набувати від'ємних значень, але такі події є нульовими
+    + Тобто на практиці вони ніколи не виринатимуть
+
+- Доведення низки теоретичних властивостей прекрасно працює, якщо якась властивість виконується тільки «майже» напевно
+    + Наприклад, може вимагатися функція, яка є неперервною майже напевно
+    + Це означає, що вона в принципі може мати зліченну кількість точок розриву
+    + Наприклад, $f(x) = 1 / x$ є неперервною майже напевно
+
+- Також будь-яка щільність унікальна **з точністю до міри нуль**
+    + Тобто якщо в одній точці поміняти значення щільности, суть не зміниться
+    + Адже інтеграл від значення в одній точці не зміниться
+
+## Функції розподілу (1)
+
+- Окрім дискретних і неперервних величин, існують  величини мішані
+
+- Обчислювати ймовірності з такими величинами через відповідні інтеграли неочевидно
+
+- Існує апарат, який працює **для повністю довільних** випадкових величин
+
+\begin{defn}<+->
+    \label{defn:distributionfunction}
+		\textbf{Функцією розподілу} (distribution function, інколи cumulative distribution function, CDF) випадкової величини $X$ є функція
+		\begin{equation}
+			F_X(x) \equiv \PPX{X \leq x} = \PPX{(-\infty; x]}\;, \qquad x\in \RR
+			\label{eq:distributionfunction}
+		\end{equation}
+\end{defn}
+
+- Можна довести, що між розподілом і функцією розподілу існує взаємно однозначне відображення
+
+- Тобто кожна випадкова величина має функцію розподілу, навіть якщо вона не має функції ймовірности чи щільности
+
+## Функції розподілу (2)
+
+- Функція розподілу $F_X(x)$ має такі властивості:
+    + Є неспадною: $F_X(x) \leq F_X(y)$, якщо $x \leq y$
+    + Є неперервною справа: $\displaystyle\lim_{x \downarrow c} F_X(x) = F_X(c)$
+        * Границю зліва прийнято позначати як $F_X(x-)$
+    + Є нормованою:
+\[
+\lim_{x \to -\infty} F_X(x) = 0\;, \qquad \lim_{x\to\infty} F_X(x) = 1
+\]
+
+- За допомогою функцій розподілу можна обчислювати ймовірності:
+    + $\PPX{X \geq x} = 1 - F(x-)$
+    + $\PPX{(a; b]} = F(b) - F(a)$, $a,b\in\RR$
+    + $\PPX{X = x} = F(x) - F(x-)$
+
+- Якщо випадкова величина неперервна, то $\PPX{X = x} = 0$
+    + Відтак $\PPX{X \geq x} = 1 - F(x)$
+    + Відтак $\PPX{(a; b]} = \PPX{[a; b)} = \PPX{(a; b)} = \PPX{[a; b]} = F(b) - F(a) = \int_a^b f(x)\, dx$, $a,b\in\RR$
+
+\visible<+->{
+```{r, echo = FALSE, out.width = '70%', fig.align = 'center', fig.cap = ''}
+knitr::include_graphics('images/cdf.png')
+```
+}
+
+## Зв'язок між функціями розподілу та щільностями
+
+- Для **неперервної** величини $X$ маємо
+\[
+F_X(x) = \PPX{X \leq x} = \int_{-\infty}^x f_X(x)\, dx
+\]
+
+- Іншими словами, для всіх точок $x$, у яких функція $F_X$ диференційовна:
+\begin{equation}
+	f_X(x) = F_X^\prime (x)
+	\label{eq:dfderivative}
+\end{equation}
+
+
+## Функції від випадкових величин
+
+- Нехай $X$ має функцію розподілу $F_X$
+
+- Нехай $g$ --- деяка вимірна^[Для наших цілей мова про довільну функцію] функція
+
+- Функцію розподілу $F_Y$ випадкової величини $Y = g(X)$ можна дістати за визначенням:
+		\begin{equation}
+		 		F_Y(y) = \PPx{Y \leq y}{Y} = \PPX{g(X) \leq y}
+		 	\label{eq:transformcdf}
+		\end{equation}
+
+- Якщо $X$ дискретна,
+\begin{equation}
+			\PPx{Y = y}{Y} = \PPX{g(X) = y} = \sum_{x: g(x) = y} \PPX{X = x}
+			\label{eq:transformpmf}
+\end{equation}
+
+- Якщо $X$ неперервна, то справедлива формула заміни змінних:
+\begin{equation}
+			f_Y(y) = f_X(g^{-1}(y)) \cdot \left|\dfrac{d}{dy} g^{-1}(y)\right| \cdot \bbmOne{y \in g(\supp{X})}
+			\label{eq:changeofvariables}
+\end{equation}
+    + Тут $f_X$ неперервна на $\supp{X}$
+    + $g$ взаємно однозначна на $\supp{X}$
+    + $g^{-1}(y)$ неперервно диференційовна на $g(\supp{X})$
+
+
+
+
+## Випадкові вектори
+
+\begin{defn}
+	\label{defn:rvector}
+\begin{itemize}[<+->]
+    \item Вимірну функцію $\bfX: \Omega \to \RR^k$ називають \textbf{випадковим вектором}
+    \item Можна довести, що $\bfX$ є випадковим вектором тоді й тільки тоді, коли $X_i$ є випадковими величинами, $i = 1, \ldots, k$
+    \item Випадковий вектор $\bfX = (X_1, \ldots, X_k)^\top: \Spaceprob \to (\RR^k, \cB^k)$ утворює розподіл $\PPsym_{\bfX}$
+			\begin{equation}
+				\PPx{A}{\bfX} \equiv \PPx{(X_1, \ldots, X_k)^\top \in A}{\bfX} \;, \qquad A\in \cB^k
+				\label{eq:jointdistribution}
+			\end{equation}
+
+		\item Такий розподіл називають \textbf{спільним розподілом} (joint distribution)
+		\item Функція відповідного розподілу має вид
+			\begin{equation}
+				F_{\bfX}(x_1, \ldots, x_k) = \PPx{X_1 \leq x_1, \ldots, X_k \leq x_k}{\bfX}
+				\label{eq:jointdistributionfunction}
+			\end{equation}
+		\item Таку функцію розподілу називають \textbf{спільною функцією розподілу} (joint distribution function)
+\end{itemize}
+\end{defn}
+
+
+## Обчислення інтегралів у багатовимірному просторі
+
+\begin{defn}
+	\label{defn:productspace}
+\begin{itemize}[<+->]
+    \item \textbf{Добутком} двох вимірних просторів, $(X, \cX)$ і $(Y, \cY)$ (product space) називають декартів добуток $X\times Y$
+    \item На $X\times Y$ можна визначити \textbf{добуток мір} (product measure) $\pi(A\times B) = \mu(A) \nu(B)$, $A\in\cX$, $B\in \cY$
+\end{itemize}
+\end{defn}
+
+\begin{thm}<+->[Теорема Фубіні (Fubini Theorem)\footnotemark]
+    \label{thm:fubini}
+\begin{itemize}[<+->]
+    \item Нехай маємо $X\times Y$ і ($\sigma$-скінченний) добуток мір $\mu \times \nu \equiv \pi$
+    \item Якщо $f: X\times Y \to \RR$ невід'ємна або інтегровна (майже напевно), то
+			\begin{equation}
+				\intdpi{f(x, y)} = \intAdmu{ \left(\intAdnu{f(x, y)}{Y}\right)}{X} = \intAdnu{ \left(\intAdmu{f(x, y)}{X}\right)}{Y}
+				\label{eq:fubini}
+			\end{equation}
+		\item Інтеграл зліва називають --  \textbf{подвійним} (double), а два інші --- \textbf{повторними} (iterated)
+\end{itemize}
+
+\end{thm}
+
+\footnotetext{Гвідо Фубіні (Guido Fubini, 1879--1943) -- італійський математик}
+
+## Спільні функція ймовірности та щільність
+
+\vspace{-0.5cm}
+
+\begin{defn}
+    \label{defn:jointpmf}
+\begin{itemize}[<+->]
+    \item Нехай маємо \textbf{дискретний} випадковий вектор $\bfX: \Spaceprob \to (\RR^k, \cB^k)$
+    \item Його розподіл абсолютно неперервний відносно лічної міри $\tthash \times \ldots \times \tthash \equiv \tthash_k$
+    \item Тоді \textbf{спільною функцією ймовірности} (joint probability mass function) є
+			\begin{equation}
+				\mkern-60mu p_\bfX(x_1, \ldots, x_k) =  \PPx{X_1 = x_1, \ldots, X_k = x_k}{\bfX} \cdot \bbmOne{(x_1, \ldots, x_k)^\top \in \supp{\bfX}}
+				\label{eq:jointpmf}
+			\end{equation}
+		\item До того ж $\ds\sum_{(x_1, \ldots, x_k)^\top\in \supp{\bfX}} p_\bfX(x_1, \ldots, x_k) = 1$
+\end{itemize}
+
+\end{defn}
+
+\vspace{-0.9cm}
+
+\begin{defn}<+->
+    \label{defn:jointpdf}
+\begin{itemize}[<+->]
+    \item Нехай розподіл деякого випадкового вектора $\bfX: \Spaceprob \to (\RR^k, \cB^k)$ \textbf{абсолютно неперервний} відносно міри Лебега $\lambda \times \ldots \times \lambda \equiv \lambda_k$
+    \item Тоді \textbf{спільною щільністю розподілу} (joint probability density function) є функція $f_\bfX$ така, що
+			\begin{equation}
+				\PPx{A}{\bfX} = \int_A f_\bfX \, d\lambda_k = \int_A f_\bfX(x_1, \ldots, x_k)\, dx_1 \ldots dx_k\;, \qquad \forall A\in \cB^k
+				\label{eq:jointdensity}
+			\end{equation}
+\end{itemize}
+
+\end{defn}
+
+## Властивості спільної щільности
+
+- За аналогією з одновимірним випадком маємо властивість
+		\begin{equation}
+			F_\bfX(x_1, \ldots, x_k) = \int_{-\infty}^{x_k}\ldots\int_{-\infty}^{x_1} f_\bfX(t_1, \ldots, t_k) \, dt_1 \ldots dt_k
+			\label{eq:jointdensitydf}
+		\end{equation}
+
+- Відповідно, маємо
+		\begin{equation}
+			f_\bfX(x_1, \ldots, x_k) = \frac{\partial^k}{\partial x_1\ldots \partial x_k} F_\bfX(x_1, \ldots, x_k)
+			\label{eq:dfderivativen}
+		\end{equation}
+
+- Також можна довести, що:
+    + $f_\bfX \geq 0$
+    + $\ds\int_{\RR^k} f_\bfX d\lambda_k = 1$
+
+## Маржинальні розподіли
+
+\begin{defn}
+    \label{defn:marginaldistribution}
+\begin{itemize}[<+->]
+    \item Розподіл $\PPsym_j$ випадкової величини $X_j$ --- $j$-ої координати деякого випадкового вектора $\bfX = (X_1, \ldots, X_k)$ --- називають \textbf{маржинальним розподілом} (marginal distribution)
+    \item Маржинальним розподілам відповідають \textbf{маржинальні функції розподілу} (marginal distribution function):
+\begin{equation}
+			\begin{split}
+	  	F_{X_j}(x) &= \PPx{X_j \leq x}{X_j} \\
+	  	&= \PPx{X_1\in \RR, \ldots, X_{j-1}\in\RR, \textcolor{red}{X_j \leq x}, X_{j+1} \in\RR, \ldots, X_k\in\RR}{\bfX}
+			\end{split}
+	\label{eq:marginaldf}
+\end{equation}
+
+\end{itemize}
+
+\end{defn}
+
+
+
+## Маржинальні щільності розподілів
+
+\begin{prop}
+    \label{prop:marginaldensity}
+\begin{itemize}[<+->]
+    \item Нехай $\PPsym_{\bfX}$ має щільність $f_\bfX$
+    \item Тоді розподіл $\PPsym_{X_j}$ має \textbf{маржинальну щільність розподілу} (marginal probability density function)
+			\begin{equation}
+				f_j(x) = \int_{\RR^{k-1}} f_\bfX(x_1, \ldots, x_{j-1}, x, x_{j+1}, \ldots ,x_k) \, dx_1 \ldots dx_{j-1} dx_{j + 1}\ldots dx_k
+			\label{eq:marginalpdf}
+			\end{equation}
+\end{itemize}
+\end{prop}
+
+\visible<+->{
+```{r,  echo = FALSE, out.width = '70%', fig.align = 'center', fig.cap = ''}
+knitr::include_graphics('images/marginal.png')
+```
+}
+
+## Спільний розподіл дискретних і випадкових величин
+
+- На практиці зустрічаються ситуації, коли випадковий вектор $\bfX$ складається з величин, деякі з яких є неперервними, а деякі --- дискретними
+
+- Наприклад, нас може цікавити аналіз ціни $X$ квартири, яка має площу $Y$ та має $Z$ кімнат
+
+- Спільний розподіл $(X, Y, Z)^\top$ \textbf{абсолютно неперервний} відносно добутку двох мір Лебега і лічної міри: $\lambda \times \lambda \times \tthash$
+
+- Тому й обчислення спільних імовірностей буде приблизно таке:
+\[
+\PPx{(X, Y, Z)^\top \in A}{X, Y, Z} = \int_{\RR} \int_{\RR}  \sum_{z \in \supp{Z}} f_{X, Y, Z}(x, y, z) \cdot \bbmOne{(x, y, z)^\top \in A}\, dx dy
+\]
+
+
+
+## Умовна ймовірність
+
+\begin{defn}
+    \label{defn:probcond}
+\begin{itemize}[<+->]
+    \item Нехай маємо вимірний простір $(\Omega, \cA)$
+    \item Нехай $A, B \in \cA$ --- деякі події,  $\PP{B} > 0$
+    \item Тоді \textbf{умовна ймовірність} $A$ за умови $B$ (conditional probability of $A$ given $B$):
+\begin{equation}
+\PP{A \mid B} = \frac{\PP{A \cap B}}{\PP{B}}
+\label{eq:probcond}
+\end{equation}
+    \item $\PP{A}$ --- \textbf{апріорна ймовірність} (prior)
+    \item $\PP{A\mid B}$ --- \textbf{апостеріорна ймовірність} (posterior)
+\end{itemize}
+
+\end{defn}
+
+- \textbf{Не існує такої події, як} $A \mid B$! \textbf{Це просто позначення!}
+
+- Можна довести, що умовна ймовірність --- це повноцінна ймовірнісна міра
+
+
+## Обумовлення як перенормалізація
+
+- Обумовлення події $A$ подією $B$ означає, що ми \textbf{перенормалізовуємо} ймовірнісну міру
+
+```{r, echo = FALSE, out.width = '70%', fig.align = 'center', fig.cap = ''}
+knitr::include_graphics('images/pebbles.png')
+```
+
+- Тут $\PP{A} = 5/9$, проте $\PP{A \mid B} = 1/4$
+
+## Обчислення умовних імовірностей
+
+\begin{thm}
+    \label{thm:condprobchain}
+\begin{itemize}[<+->]
+    \item Нехай $\PP{A_1 \cap \ldots \cap A_n} > 0$
+    \item Тоді
+\begin{equation}
+\begin{split}
+				\PP{A_1 \cap \ldots \cap A_n} &= \PP{A_1} \PP{A_2 \mid A_1}\PP{A_3 \mid A_1, A_2} \ldots \PP{A_n \mid A_1, \ldots, A_{n-1}}\\
+				&= \PP{A_2} \PP{A_1 \mid A_2} \PP{A_1 \mid A_2, A_3}\ldots \PP{A_n \mid A_1, \ldots, A_{n-1}}\\
+				&= \ldots
+		\end{split}
+		\label{eq:probintersectioncondn}
+\end{equation}
+    \item І т.д. для всіх можливих комбінацій подій
+\end{itemize}
+
+\end{thm}
+
+## Теорема Беєса та закон повної ймовірности
+
+\begin{thm}[Теорема Беєса (Bayes' Theorem)\footnotemark]
+    \label{thm:bayes}
+\begin{itemize}[<+->]
+    \item Нехай маємо вимірний простір $(\Omega, \cA)$
+    \item Для подій $A, B\in \cA$, $\PP{B} > 0$, справедливо:
+\begin{equation}
+ 	\PP{A\mid B} = \frac{\PP{B\mid A} \PP{A}}{\PP{B}}
+ 	\label{eq:bayes}
+\end{equation}
+\end{itemize}
+
+\end{thm}
+
+\footnotetext{Томас Беєс (Thomas Bayes, 1701--1761) --- англійський статистик, філософ і священник}
+
+\begin{thm}[Закон повної ймовірности (Law of total probability)]<+->
+    \label{thm:totalprob}
+\begin{itemize}[<+->]
+    \item Нехай маємо вимірний простір $(\Omega, \cA)$
+    \item Розгляньмо розбиття: $\Omega = \bigcup_{i=1}^n A_i$, $A_i \cap A_j = \emptyset$, $i \neq j$
+    \item Тут $\PP{A_i} > 0$ для всіх $i$
+    \item Тоді
+			\begin{equation}
+				\PP{B} = \sum_{i=1}^n \PP{B\mid A_i}\PP{A_i}
+				\label{eq:totalprob}
+			\end{equation}
+\end{itemize}
+
+\end{thm}
+
+## Обумовлення декількома подіями
+
+- Аналогічні результати можна показати, якщо обумовити додатковою подією
+
+- Нехай $A, B, C \in \cA$, $\PP{B\cap C} > 0$
+
+- Тоді
+\begin{equation}
+	\PP{A\mid B, C} = \frac{\PP{B\mid A, C} \PP{A\mid C}}{\PP{B\mid C}}
+	\label{eq:bayesadd}
+\end{equation}
+
+- Нехай $A_1, \ldots, A_n$ утворюють розбиття $\Omega$, і $\PP{A_i\cap B} > 0$ для всіх $i$
+
+- Тоді
+\begin{equation}
+	\PP{B\mid C} = \sum_{i=1}^n \PP{B\mid A_i, C}\PP{A_i\mid C}
+	\label{eq:totalprobadd}
+\end{equation}
+
+## Обумовлення випадковою величиною
+
+- На практиці ми скрізь стикаємося з ситуаціями, коли треба порахувати ймовірності подій (у тому числі з випадковими величинами) **за умови іншої випадкової величини**
+
+- Наприклад, $X$ відповідає ціні квартири (у грн), а $Y$ --- її площі (у кв. м)
+
+- Нас може цікавити ймовірність $\PPx{X > 100\ 000 \mid Y = 70}{X\mid Y}$
+
+- Проте ми знаємо, що для неперервної величини $\PPx{Y = 70}{Y} = 0$
+
+- Щоб обійти це обмеження, ми формально розглядаємо обумовлення $\sigma$-алгеброю, яку породжує $Y$
+    + Деталі можна прочитати в КЛТЙ 12.2
+    + Фактично, мова про те, що
+\[
+\PPx{X > 100\ 000 \mid Y = 70}{X\mid Y} = \lim_{h_n \to 0} \PPx{X > 100\ 00 \mid Y \in (70 - h_n; 70 + h_n)}{X \mid Y}
+\]
+
+- На практиці нас у першу чергу цікавлять формули обчислення відповідних імовірностей
+
+## Умовні розподіли
+
+\vspace{-0.5cm}
+
+\begin{defn}
+    \label{defn:condpmf}
+\begin{itemize}[<+->]
+    \item Нехай випадкові величини $X$ та $Z$ мають спільний \textbf{дискретний} розподіл  зі щільністю з функцією ймовірности $p_{Z,X} \equiv \PPx{(Z = z)\cap (X = x)}{Z,X}$
+    \item Тоді \textbf{умовною функцією ймовірности $Z$ за умови $X$} (conditional probability mass function of $Z$ given $X$) є
+\vspace{-0.4cm}
+\begin{equation}
+\PPx{Z = z \mid X = x}{Z \mid X} = \frac{\PPx{(Z = z)\cap (X = x)}{Z,X}}{\PPx{X = x}{X}}
+\label{eq:condpmf}
+\end{equation}
+    \item Якщо $\PPx{X = x}{X} = 0$ для деякого $x$, умовну ймовірність \textbf{не визначено}
+\end{itemize}
+
+\end{defn}
+
+\vspace{-0.9cm}
+
+\begin{defn}<+->
+    \label{defn:condpdf}
+\begin{itemize}[<+->]
+    \item Нехай випадкові величини $X$ та $Z$ мають спільний \textbf{неперервний}  розподіл  зі щільністю  $f_{Z,X}$
+    \item Тоді \textbf{умовною щільністю розподілу $Z$ за умови $X$} (conditional probability density of $Z$ given $X$) є
+\vspace{-0.4cm}
+			\begin{equation}
+				f_{Z\mid X}(z\mid x) = \begin{cases}
+					\dfrac{f_{Z,X}(z, x)}{f_X(x)}\;, & f_X(x) \neq 0\\
+					\xi(z)\;, & f_X(x) = 0
+				\end{cases}
+				\label{eq:condpdfcontinuous}
+			\end{equation}
+		\item Тут $\xi$ є деякою абсолютно довільною щільністю розподілу
+\end{itemize}
+
+\end{defn}
+
+## Інтуїтивна інтерпретація умовної функції ймовірности
+
+- Ми «вирізаємо» зі спільної функції ймовірности частину, яка відповідає $X = x$
+
+- Ми додатково \textbf{ділимо} на $\PPx{X = x}{X}$ для нормалізації новоутвореної (умовної) функції ймовірности, щоб сума її значень дорівнювала 1
+
+\visible<+->{
+```{r, echo = FALSE, out.width = '70%', fig.align = 'center', fig.cap = ''}
+knitr::include_graphics('images/condpmf.png')
+```
+}
+
+## Інтуїтивна інтерпретація умовної щільности розподілу
+
+- Ми «вирізаємо» зі спільної щільности розподілу частину, яка відповідає $X = x$
+
+- Потім ми її ділимо на $f_X(x)$ для нормалізації новоутвореної (умовної) щільности розподілу, щоб її інтеграл дорівнював 1
+
+\visible<+->{
+```{r, echo = FALSE, out.width = '70%', fig.align = 'center', fig.cap = ''}
+knitr::include_graphics('images/condpdf.png')
+```
+}
+
+- Для умовної щільности також, із цілком очевидних міркувань, справедлива теорема Беєса:
+\begin{equation}
+	f_{Z\mid X}(z\mid x) = \frac{f_{X\mid Z}(x\mid z) f_Z(z)}{f_X(x)}\;, \quad f_X(x) > 0
+	\label{eq:bayescontinuous}
+\end{equation}
+
+
+
+## Незалежність подій
+
+\vspace{-0.5cm}
+
+\begin{defn}
+    \label{defn:independentevents}
+\begin{itemize}[<+->]
+    \item Події $A$ і $B$ називають \textbf{незалежними} (independent)($A \ind B$), якщо
+			\begin{equation}
+				\PP{A \cap B} = \PP{A}\PP{B}
+				\label{eq:independentevents}
+			\end{equation}
+		\item Якщо $\PP{A} > 0$ і $\PP{B} > 0$, то маємо $\PP{A\mid B} = \PP{A}$, $\PP{B\mid A} = \PP{B}$
+\end{itemize}
+
+\end{defn}
+
+\vspace{-0.3cm}
+
+- Можна довести, що якщо $A \ind B$, то $A\ind B^c$, $A^c\ind B$, $A^c\ind B^c$
+
+\vspace{-0.3cm}
+\begin{defn}<+->
+    \label{defn:independenteventsmany}
+\begin{itemize}[<+->]
+    \item Події $A_1, \ldots, A_n$ незалежні ($A_1 \ind \ldots \ind A_n$), якщо:
+    \begin{itemize}
+        \item $\PP{A_i \cap A_j} = \PP{A_i}\PP{A_j}$ для всіх $i\neq j$
+        \item $\PP{A_i \cap A_j \cap A_k} = \PP{A_i} \PP{A_j}\PP{A_k}$ для всіх $i,j,k$ різних
+        \item і т.д.
+    \end{itemize}
+\end{itemize}
+\end{defn}
+
+\vspace{-0.7cm}
+
+\begin{defn}<+->
+    \label{defn:independenteventscond}
+		Події $A$ і $B$ \textbf{умовно незалежні} (conditionally independent) за умови настання події $C$ ($A\ind B \mid C$), якщо $\PP{A \cap B\mid C} = \PP{A\mid C}\PP{B\mid C}$
+\end{defn}
+
+
+## Незалежність випадкових величин
+
+\begin{defn}
+    \label{defn:independentrv}
+\begin{itemize}[<+->]
+    \item Випадкові вектори $\bfX_1: \Spaceprob \to \RR^{d_1}$, $\ldots$, $\bfX_k: \Spaceprob \to \RR^{d_k}$ \textbf{незалежні} (independent), якщо
+			\begin{equation}
+				\mkern-40mu \PPx{\bfX_1 \in H_1, \ldots, \bfX_k\in H_k}{\bfX} = \PPx{\bfX_1 \in H_1}{\bfX_1}\cdot\ldots\cdot\PPx{\bfX_k\in H_k}{\bfX_k}\;,\  H_i \in \cB^{d_i}\;,
+				\label{eq:independentrvasprobabilitiesvectors}
+			\end{equation}
+\end{itemize}
+
+\end{defn}
+
+- Можна довести, що  $X_1, \ldots, X_k$ незалежні **тоді й тільки тоді**, коли
+    + $F_\bfX(x_1, \ldots, x_k)  = F_{X_1}(x_1)\cdot\ldots\cdot F_{X_k}(x_k)\;, \quad x_i \in (-\infty; \infty) \cup \set{\infty}$
+    + Якщо існують щільності, то $f_\bfX(x_1, \ldots, x_k) = f_1(x_1)\cdot\ldots\cdot f_k(x_k)\;, \qquad x_i \in \RR$
+    + Зокрема, для дискретних величин $\PPx{X_1 = x_1, \ldots, X_k = x_k}{\bfX} = \PPx{X_1 = x_1}{X_1}\cdot\ldots\cdot \PPx{X_k = x_k}{X_k}$
+
+- Також можна довести, що якщо незалежні випадкові величини, то незалежні й **функції** від них
+
+
+## Сподівання випадкової величини
+
+\begin{defn}
+    \label{defn:expectation}
+		\textbf{Сподіванням} (expectation) будь-якої випадкової величини $X$ є її інтеграл:
+		\begin{equation}
+			\EE{X} = \intdP{X}
+			\label{eq:expectation}
+		\end{equation}
+\end{defn}
+
+- $\EE{X} \in \RR$, тобто воно є (сталим)  \textbf{числом}
+
+- Поняття сподівання подібне до поняття центру мас у фізиці
+
+
+## Обчислення сподівань
+
+- Для **дискретної** величини $X$ з функцією ймовірности $p_X$ сподівання $g(X)$ дорівнює
+\begin{equation}
+	\EE{g(X)} = \intdhash{g(x) \cdot p_X(x)} = \sum_{x\in\supp{X}} g(x)\cdot p_X(x)
+	\label{eq:lotusdiscrete}
+\end{equation}
+
+- Для **неперервної** величини $X$ зі щільністю $f_X$ сподівання $g(X)$ дорівнює
+\begin{equation}
+	\EE{g(X)} = \intdlambda{g(x) \cdot f_X(x)} = \int_{-\infty}^\infty g(x)\cdot f_X(x)\, dx
+	\label{eq:lotuscontinuous}
+\end{equation}
+
+- Сподівання може бути нескінченним
+
+- Сподівання може взагалі не існувати (наприклад, у розподілу Коші)
+
+- Якщо сподівання скінченне, кажуть, що воно **існує** і що $X$ **інтегровна**
+
+- Для інтегровних $X$ та $Y$ можна довести такі властивості:
+    + Якщо $X \geq 0$ майже напевно, то $\EE{X} \geq 0$
+    + **Лінійність сподівання**: для всіх $a,b\in\RR$ виконується $\EE{aX+ bY} = a\EE{X} + b\EE{Y}$
+    + **Монотонність**: якщо $X \leq Y$ майже напевно, то $\EE{X} \leq \EE{Y}$
+    + Якщо $X = Y$ майже напевно, то $\EE{X} = \EE{Y}$
+
+## Дисперсія випадкової величини
+
+\begin{defn}
+    \label{defn:vardiscrete}
+\begin{itemize}[<+->]
+    \item \textbf{Дисперсією} (variance) випадкової величини $X$ є
+			\begin{equation}
+				\Var{X} = \EE{(X - \EE{X})^2}
+				\label{eq:vardiscrete}
+			\end{equation}
+		\item \textbf{Середньоквадратичним відхиленням} (standard deviation) випадкової величини $X$ є
+			\begin{equation}
+				\sd{X} = \sqrt{\Var{X}}
+				\label{eq:stddiscrete}
+			\end{equation}
+\end{itemize}
+
+\end{defn}
+
+- Часто $\Var{X}$ позначають через $\sigma^2_X$, і тоді $\sd{X}$ має позначення $\sigma_X$
+
+- Дисперсія показує, наскільки \textbf{далеко (в середньому)} стоять від $\EE{X}$ значення величини $X$
+
+- Тобто \textbf{наскільки сильно} значення величини $X$ \textbf{розкидано} відносно $\EE{X}$
+
+- Можна показати, що $\Var{X} = \EE{X^2} - (\EE{X})^2$
+
+- Варто звернути увагу, що дисперсія не є лінійною:
+\[
+\Var{aX + b} = a^2\Var{X}
+\]
+
+
+
+## Нерівність Єнсена
+
+\begin{thm}[Нерівність Єнсена (Jensen's inequality)\footnotemark]
+    \label{thm:jensen}
+\begin{itemize}[<+->]
+    \item Нехай функція $\varphi: \RR \to \RR$ \textbf{опукла}
+    \item Нехай випадкові величини $X$ і $\varphi(X)$  інтегровні
+    \item Тоді
+			\begin{equation}
+				\EE{\varphi(X)} \geq \varphi(\EE{X})
+				\label{eq:jensen}
+			\end{equation}
+\end{itemize}
+
+\end{thm}
+
+\footnotetext{Йоган Єнсен (Johan Ludwig William Valdemar Jensen, 1859--1925) --- данський математик}
+
+- Якщо функція \textbf{вгнута} (concave), тобто опукла вгору, то $\EE{\varphi(X)} \leq \varphi(\EE{X})$
+
+- $\EE{\varphi(X)} = \varphi(\EE{X})$ тоді й тільки тоді, коли $\varphi(X) = a + bX$ майже напевно
+
+- Конкретні приклади:
+    + $\EE{|X|} \geq |\EE{X}|$
+    + $\EE{X^r} \geq (\EE{X})^r$ для $r > 1$ для додатних випадкових величин $X$
+    + $\EE{\dfrac{1}{X}} \geq \dfrac{1}{\EE{X}}$ для додатних випадкових величин $X$
+    + $\EE{\ln X} \leq \ln (\EE{X})$ для додатних випадкових величин $X$
+    + $\EE{X^r} \leq (\EE{X})^r$ для $0 < r < 1$
+
+## Нерівність Маркова
+
+\begin{thm}[Нерівність Маркова (Markov's inequality)\footnotemark]
+    \label{thm:markov}
+\begin{itemize}[<+->]
+    \item Нехай $g: \RR\to [0; \infty)$ --- неспадна вимірна функція
+    \item Тоді для \textbf{будь-якої} випадкової величини $X$ має місце
+			\begin{equation}
+				\PPX{X\geq c} \leq \frac{\EE{g(X)}}{g(c)} \;, \qquad c > 0
+				\label{eq:markov}
+			\end{equation}
+\end{itemize}
+
+\end{thm}
+
+\footnotetext{Андрєй Марков (1856--1922) --- російський математик}
+
+- Класичне формулювання, якщо $X \geq 0$ майже напевно, а $g(x) = x$:
+			\begin{equation}
+				\PPX{X\geq c} \leq \frac{\EE{X}}{c}\;, \qquad c > 0
+				\label{eq:markovclassical}
+			\end{equation}
+
+- Можна прибрати вимогу про невід'ємність величини $X$, розглянувши $|X|$:
+\[
+\PPX{|X| \geq c} \leq \frac{\EE{|X|}}{c}\;, \qquad c > 0
+\]
+
+- Або, що те ж саме:
+\[
+\ds \PPX{|X| \geq c\cdot \EE{|X|}} \leq \frac{1}{c}\;, \qquad c > 0
+\]
+
+
+## Нерівність Чебишова
+
+- Чи не \textbf{найважливішим} наслідком нерівности Маркова є \textbf{нерівність Чебишова} (Chebyshev's inequality)^[Пафнутій Чебишов (1821--1894) --- російський математик]:
+\begin{equation}
+	\PPX{|X - \EE{X}| \geq c} \leq \frac{\Var{X}}{c^2}\;, \qquad c > 0
+	\label{eq:chebyshev}
+\end{equation}
+
+- Альтернативна форма запису цієї нерівности:
+\[
+\PPX{|X - \EE{X}| \geq c\cdot \sigma_X} \leq \frac{1}{c^2}\;, \qquad c > 0
+\]
+
+- Випадкова величина \textbf{не може} суттєво \textbf{відхилятися} від свого сподівання на деяку відстань, що вимірюється в середньоквадратичних відхиляннях
+
+- Якщо порівняти нерівності Маркова й Чебишова, то нерівність Чебишова пропонує \textbf{точнішу} оцінку
+
+- Проте вона вимагає існування \textbf{скінченної дисперсії} (Марков вимагає тільки існування скінченного \textbf{сподівання})
+
+## Незалежність сподівань
+
+\begin{thm}
+    \label{thm:independentexpectationproduct}
+\begin{itemize}[<+->]
+    \item Нехай $X$ і $Y$ --- дві незалежні випадкові величини
+    \item Нехай $f, g:\RR \to \RR$ --- вимірні функції такі, що вони невід'ємні чи інтегровні
+    \item Тоді
+			\begin{equation}
+				\EE{f(X)g(Y)} = \EE{f(X)}\EE{g(Y)}
+				\label{eq:independentexpectationproductfg}
+			\end{equation}
+\end{itemize}
+
+\end{thm}
+
+- Частковий випадок: якщо $X_1, \ldots, X_k$ незалежні, невід'ємні чи інтегровні, то
+\begin{equation}
+		\EE{\prod_{i=1}^k X_i} = \prod_{i=1}^k \EE{X_i}
+		\label{eq:independentexpectationk}
+\end{equation}
+
+<!-- ## Моменти -->
+
+<!-- \vspace{-0.5cm} -->
+
+<!-- \begin{defn} -->
+<!--     \label{defn:moments} -->
+<!-- \begin{itemize}[<+->] -->
+<!--     \item Для  випадкової величини $X$ \textbf{абсолютним моментом $k$-го порядку} (k-th absolute moment) є -->
+<!-- 			\begin{equation} -->
+<!-- 				\EE{|X|^k} = \intdP{|x|^k}\;, \qquad k = 1, 2, \ldots -->
+<!-- 				\label{eq:absolutemoments} -->
+<!-- 			\end{equation} -->
+<!-- 		\item Якщо \eqref{eq:absolutemoments} скінченний для деякого $k$, кажемо, що випадкова величина $X$ має  \textbf{момент $k$-го порядку} (k-th absolute moment), який дорівнює -->
+<!-- 			\begin{equation} -->
+<!-- 				\EE{X^k} = \intdP{ x^k}\;, \qquad k = 1, 2, \ldots -->
+<!-- 				\label{eq:moments} -->
+<!-- 			\end{equation} -->
+<!-- \end{itemize} -->
+
+<!-- \end{defn} -->
+
+<!-- \vspace{-0.3cm} -->
+
+<!-- - Із визначень випливає, що сподівання $\EE{X}$ є моментом першого порядку -->
+
+<!-- - Можна показати, що якщо скінченний абсолютний момент $k$-го порядку, то скінченний також і абсолютний момент $j$-го порядку, $j < k$ -->
+
+<!-- - Тобто якщо деякого моменту $j$-го порядку \textbf{не існує}, то \textbf{не існує} жодних моментів вищих порядків -->
+<!--     + Наприклад, у розподілу Коші не існує сподівання -->
+<!--     + Відтак у нього не існує жодних інших моментів вищих порядків -->
+
+<!-- ## Центральні моменти -->
+
+<!-- \begin{defn} -->
+<!--     \label{defn:centralmoments} -->
+<!-- \begin{itemize}[<+->] -->
+<!--     \item Для  випадкової величини $X$  \textbf{абсолютним центральним моментом $k$-го порядку} (k-th absolute central moment) -->
+<!-- 			\begin{equation} -->
+<!-- 				\EE{|X - \EE{X}|^k} = \intdP{\left|x - \EE{X}\right|^k}\;, \qquad k = 1, 2, \ldots -->
+<!-- 				\label{eq:absolutecentralmoments} -->
+<!-- 			\end{equation} -->
+<!-- 		\item Якщо \eqref{eq:absolutecentralmoments} скінченний для деякого $k$, кажемо, що випадкова величина $X$ має  \textbf{центральний момент $k$-го порядку} (k-th central moment), який дорівнює -->
+<!-- 			\begin{equation} -->
+<!-- 				\EE{(X - \EE{X})^k} = \intdP{(x  - \EE{X})^k}\;, \qquad k = 1, 2, \ldots -->
+<!-- 				\label{eq:centralmoments} -->
+<!-- 			\end{equation} -->
+<!-- \end{itemize} -->
+
+<!-- \end{defn} -->
+
+<!-- - Із визначення випливає, що дисперсія $\Var{X} = \EE{(X - \EE{X})^2}$ є центральним моментом другого порядку -->
+
+## Сподівання випадкового вектора
+
+\begin{defn}<+->
+    \label{defn:expectationvector}
+\textbf{Сподіванням} (expectation) випадкового вектора $\bfX = (X_1, \ldots, X_k)^\top: \Spaceprob \to \RR^k$ є вектор
+		\begin{equation}
+			\EE{\bfX} = \begin{pmatrix}
+				\EE{X_1}\\
+				\vdots\\
+				\EE{X_k}
+			\end{pmatrix}
+			\label{eq:expectationvector}
+		\end{equation}
+\end{defn}
+
+- За властивістю лінійности (одновимірного) сподівання:
+		\begin{equation}
+			\EE{\bfA \bfX + \bfb} = \bfA\EE{\bfX} + \bfb\;, \qquad \bfA \in \RR^n\times \RR^k\;, \bfb \in \RR^n
+			\label{eq:expectationvvectorlinear}
+		\end{equation}
+
+## Коваріація
+
+\vspace{-0.3cm}
+
+\begin{defn}
+    \label{defn:covariance}
+		\textbf{Коваріацією} (covariance) двох випадкових величин $X$ і $Y$ є
+		\begin{equation}
+			\Cov{X}{Y} = \EE{(X - \EE{X})(Y - \EE{Y})}
+			\label{eq:covariance}
+		\end{equation}
+\end{defn}
+
+\vspace{-0.3cm}
+
+- За аналогією з позначенням дисперсії $\sigma_X^2$, коваріацію часто позначають як $\sigma_{XY}$
+
+- Можна довести такі властивості коваріацій:
+    + $\Cov{X}{Y} = \Cov{Y}{X}$
+    + $\Cov{X}{X} = \Var{X}$
+    + $\Cov{X}{Y} = \EE{XY} - \EE{X}\EE{Y}$
+    + $\Cov{X}{a} = 0$, $a\in\RR$
+    + $\Cov{aX + bY}{cV + dW} = ac\Cov{X}{V} + ad\Cov{X}{W} + bc\Cov{Y}{V} + bd\Cov{Y}{W}$
+    + $\Var{X + Y} = \Var{X} + \Var{Y} + 2\Cov{X}{Y}$
+    + $\Var{\sum_{i=1}^k X_i} = \sum_{i=1}^k \Var{X_i} + 2\sum_{i < j}\Cov{X_i}{X_j}$
+
+- Можна довести, що якщо $X\ind Y$, то $\Cov{X}{Y} = 0$
+
+- Такі випадкові величини називають \textbf{некорельованими} (uncorrelated)
+
+- При цьому дуже важливо пам'ятати, що \textbf{зворотне твердження в загальному випадку несправедливе}
+
+<!-- ## Нерівність Коші-Буняковского -->
+
+<!-- - Можна довести \textbf{нерівність Коші-Буняковського}  (Cauchy-Schwarz inequality)^[Огюстен-Луї Коші (Augustin-Louis Cauchy, 1789--1857) --- французький математик. Віктор Буняковський (1804--1889) --- український математик. Германн Шварц (Karl Hermann Amandus Schwarz, 1843--1921) --- німецький математик] -->
+
+<!-- - Одне з формулювань таке: -->
+<!-- \begin{equation} -->
+<!-- 	\EE{|XY|} \leq \sqrt{\EE{X^2}} \sqrt{\EE{Y^2}} -->
+<!-- 	\label{eq:cauchyschwarz} -->
+<!-- \end{equation} -->
+
+<!-- - Використовуючи коваріації, можна вивести альтернативне формулювання: -->
+<!-- \begin{equation} -->
+<!-- |\Cov{X}{Y}|  \leq  \sqrt{\Var{X}\Var{Y}} -->
+<!-- 	\label{eq:cauchyschwarzcov} -->
+<!-- \end{equation} -->
+
+## Кореляція
+
+\begin{defn}<+->
+    \label{defn:correlation}
+\textbf{Коефіцієнтом кореляції} (correlation) $X$ та $Y$ є
+		\begin{equation}
+			\Corr{X}{Y} = \frac{\Cov{X}{Y}}{\sqrt{\Var{X}\Var{Y}}}
+			\label{eq:correlation}
+		\end{equation}
+\end{defn}
+
+- Коефіцієнт кореляції часто позначають як $\rho_{XY}$
+
+- Можна показати, що $\rho_{XY} \in [-1; 1]$
+
+- Коваріація $\Cov{X}{Y}$ показує ступінь \textbf{лінійного} зв'язку між $X$ та $Y$
+    + Якщо $\Cov{X}{Y} > 0$, то між величинами існує \textbf{додатний} лінійний зв'язок: \textbf{більші} значення однієї величини свідчать про \textbf{більші} значення іншої
+    + Якщо $\Cov{X}{Y} < 0$, то між величинами існує \textbf{від'ємний} лінійний зв'язок: \textbf{більші} значення однієї величини свідчать про \textbf{менші} значення іншої
+    + Якщо $\Cov{X}{Y} = 0$, то \textbf{лінійного} зв'язку між величинами \textbf{немає}
+
+- Аналогічно для $\Corr{X}{Y}$: що ближчі значення $\Corr{X}{Y}$ за модулем до 1, то сильніша лінійна залежність
+
+## Матриція коваріацій
+
+\begin{defn}
+    \label{defn:covariancematrix}
+\begin{itemize}[<+->]
+    \item Нехай $\bfX = (X_1, \ldots, X_k)^\top: \Spaceprob \to \RR^k$~--- деякий випадковий вектор
+    \item Тоді його \textbf{матрицею коваріацій} (covariance matrix) є матриця
+			\begin{equation}
+			\begin{split}
+					\Covm{\bfX} &= \EE{(\bfX - \EE{\bfX})(\bfX - \EE{\bfX})^\top}\\
+					&=  \begin{pmatrix}
+						\Var{X_1} & \Cov{X_1}{X_2} & \ldots &\Cov{X_1}{X_k}\\
+						\Cov{X_2}{X_1} & \Var{X_2} & \ldots & \Cov{X_2}{X_k}\\
+						\vdots & \vdots & \ddots & \vdots\\
+						\Cov{X_k}{X_1} & \Cov{X_k}{X_2} & \ldots & \Var{X_k}
+					\end{pmatrix}
+				\end{split}
+				\label{eq:covariancematrix}
+			\end{equation}
+\end{itemize}
+
+\end{defn}
+
+- Можна показати, що матриця коваріацій має такі властивості:
+    + \textbf{Симетричність}: $\Sigma^\top = \Sigma$
+    + $\Covm{\bfA \bfX + \bfb} = \bfA \Sigma \bfA^\top$
+    + \textbf{Невід'ємна визначеність}: $\bfa^\top \Sigma \bfa \geq 0\;, \qquad \bfa\in\RR^k$
+
+## Умовне сподівання
+
+- Нехай випадкові величини $X$ та $Z$ мають неперервний спільний розподіл  зі щільністю  $f_{Z,X}$
+
+- Нехай функція $g(Z)$ інтегровна
+
+- Тоді **умовне сподівання** (conditional expectation) $g(Z)$ за умови $X$ дорівнює
+\begin{equation}
+  \EE{g(Z)\mid X = x} = \intRRdz{g(z)\cdot f_{Z\mid X}(z\mid x)}
+  \label{eq:condecontinuous}
+\end{equation}
+
+- Варто звернути увагу, що умовне сподівання є \textbf{функцією від }$z$, а не сталою
+
+- Тобто умовне сподівання є \textbf{випадковою величиною}!
+
+- Для дискретної величини маємо
+\[
+\EE{g(Z)\mid X=x} = \sum_{z \in \supp{Z}}  g(z) \PP{Z = z \mid X=x}
+\]
+
+- Нехай події $B_1, B_2, \ldots$ утворюють не більш ніж зліченне розбиття $\Omega$
+
+- Тоді умовне сподівання
+\begin{equation}
+  \EE{X \mid B_i} = \frac{\ds \intAdP{X}{B_i}}{\PP{B_i}}
+	\label{eq:condexpgivenevent}
+\end{equation}
+
+- Якщо $\PP{B_i} = 0$, то (стале) значення $\EE{X \mid B_i}$ може бути довільне
+
+
+## Закон повного сподівання
+
+\begin{thm}[Закон повного сподівання (Law of total expectation)]
+    \label{thm:lawoftotalexp}
+\begin{itemize}[<+->]
+    \item Нехай події $B_1, B_2, \ldots$ утворюють не більш ніж зліченне розбиття $\Omega$
+    \item Тоді \textbf{безумовне} сподівання випадкової величини $X$ дорівнює
+			\begin{equation}
+				\EE{X} = \sum_{i} \EE{X\mid B_i}\PP{B_i}
+				\label{eq:lawoftotalexp}
+			\end{equation}
+\end{itemize}
+\end{thm}
+
+## Закон ітерованих сподівань
+
+- Можна показати, що якщо $Y$ і $XY$ інтегровні, то майже напевно
+\begin{equation}
+		\EE{XY\mid X} = X\EE{Y\mid X}
+		\label{eq:condexpectationconstant}
+\end{equation}
+
+\begin{thm}<+->[Закон ітерованих сподівань (Law of iterated expectations)]
+    \label{thm:lie}
+\begin{itemize}[<+->]
+    \item Нехай $X$ інтегровна
+    \item Тоді
+			\begin{equation}
+				\EE{X} = \EE{\EE{X \mid Y}}
+				\label{eq:prelie}
+			\end{equation}
+\end{itemize}
+
+\end{thm}
+
+- Можна помітити, що $\PPX{X\in A} = \EE{\bbmOne{X \in A}}$
+
+- Відтак справедливий закон повної ймовірности в неперервному випадку:
+\begin{equation}
+	\PPX{X \in A} = \intRRdy{\PPx{X \in A\mid Y = y}{X \mid Y} \cdot f_Y(y)}
+	\label{eq:totalprobcont}
+\end{equation}
+
+## Умовна дисперсія
+
+- За аналогією з умовними сподіванням також можна визначити умовні моменти довільного порядку
+
+- Зокрема, \textbf{умовною дисперсію} (conditional variance) величини $Z$ за умови величини $X$ є
+\begin{equation}
+	\Var{Z\mid X} = \EE{(Z - \EE{Z\mid X})^2 \mid X}
+	\label{eq:condvariance}
+\end{equation}
+
+\begin{thm}<+->[Закон повної дисперсії (Law of total variance)]
+    \label{thm:lawoftotalvariance}
+\begin{itemize}[<+->]
+    \item Нехай $X$ та $Z$ --- дві випадкові величини
+    \item Тоді дисперсію $\Var{X}$, якщо вона існує, можна розписати так:
+			\begin{equation}
+				\Var{X} = \EE{\Var{X\mid Z}} + \Var{\EE{X\mid Z}}
+				\label{eq:lawoftotalvariance}
+			\end{equation}
+\end{itemize}
+
+\end{thm}
+
+# Огляд деяких найважливіших розподілів
+
+## Загальні міркування
+
+- Ми згадаємо деякі найважливіші розподіли, які часто виринають на практиці
+
+- В R усі ці розподіли реалізовані в пакеті `stats`
+
+- Для кожного розподілу існує 4 функції, які мають однакову назву, але різні префікси:
+    + Функція з префіксом `p` (від probability) реалізує функцію розподілу
+    + Функція з префіксом `d` (від density) реалізує щільність розподілу / функцію ймовірности
+    + Функція з префіксом `q` (від quantile) реалізує функцію квантилів
+    + Функція з префіксом `r` (від random) реалізує генератор псевдовипадкових чисел згідно з розподілом
+
+## Розподіл Бернуллі
+
+- Чи не найпростішим розподілом є **розподіл Бернуллі** (Bernoulli distritubion)^[Яків Бернуллі (Jacob Bernoulli, 1654--1705) --- швейцарський математик]
+
+- Це дискретний розподіл із функцією ймовірности
+\begin{equation}
+  p_X(x) = p^x (1 - p)^{1 - x} \cdot \bbmOne{x \in \set{0, 1}}
+  \label{eq:bernoullipmf}
+\end{equation}
+
+- Тобто $X$ може набувати тільки значень 1 або 0 з імовірностями $p$ або $1 - p$ відповідно
+
+- Це позначають через $X \sim \bern{p}$
+
+- Можна порахувати, що $\EE{X} = p$, а $\Var{X} = p(1 - p)$
+
+## Біномний розподіл
+
+- Нехай маємо $X_1, \ldots, X_n \simiid \bern{p}$
+    + Фактично маємо так звану схему Бернуллі
+    + Тут i.i.d. означає **independent and identically distributed** (незалежні й однаково розподілені)
+
+- Тоді $X = \sum_{i=1}^n X_i$ має **біномний розподіл** із параметрами $n$ і $p$
+
+- Це позначають через $X \sim \bin{n}{p}$
+
+- $X$ відповідає загальному числу «успіхів» (подій, що стаються з імовірністю $p$) із-посеред $n$ можливих
+
+- Функція ймовірности дорівнює
+\begin{equation}
+	p_X(k) = \binom{n}{k} p^k (1 - p)^{n-k} \cdot \bbmOne{k \in \set{0, 1, \ldots, n}}
+	\label{eq:binompmf}
+\end{equation}
+
+- Очевидно, що якщо $X \sim \bern{p}$ і $Y \sim \bin{1}{p}$, то $X \eqdist Y$
+
+- Можна порахувати, що $\EE{X} = np$, а $\Var{X} = np(1 - p)$
+
+- Можна показати, що якщо $X_i \sim \bin{n_i}{p}$, $i = 1, \ldots, k$, і всі незалежні, то $\sum_{i=1}^k X_i \sim \bin{\sum_{i=1}^k n_i}{p}$
+
+## Біномний розподіл і розподіл Бернуллі в R
+
+- Оскільки розподіл Бернуллі є частковим випадком біномного, в пакеті `stats` існує одна сім'я функцій `binom`
+
+- Наприклад, нехай компанія виробляє гайки пакетами по 10 штук
+
+- Нехай гайки можуть бути з дефектом з імовірністю 0.1 незалежно одна від одної
+
+- Тоді $X=$«число дефективних гайок у пакеті» має розподіл $X\sim \bin{10}{0.1}$
+
+- Наприклад, імовірність того, що в пакеті 2 дефективні гайки дорівнює $\ds \PPX{X = 2} = \binom{10}{2} 0.1^2 (1 - 0.1)^{10 - 2}$
+
+- В R це можна порахувати так
+```{r binom_screws, indent = "    "}
+dbinom(2, size = 10, prob = 0.1)
+```
+
+- Компанія поверне кошти, якщо в пакеті буде більше 1 дефективної гайки
+
+- За яку частку пакетів повернуть кошти?
+
+- Відповідь дорівнює $\PPX{X > 1} = 1 - \PPX{X \leq 1} = 1 - \PPX{X = 0} - \PPX{X = 1}$
+
+- Або
+```{r binom_screws_p, indent = "    "}
+1 - dbinom(0, size = 10, prob = 0.1) - dbinom(1, size = 10, prob = 0.1)
+1 - pbinom(1, size = 10, prob = 0.1)
+pbinom(1, size = 10, prob = 0.1, lower.tail = FALSE)
+```
+
+
+## Функції ймовірности біномного розподілу
+
+```{r binom_pmf, echo = FALSE, fig.align = "center", out.width = "100%"}
+n <- 10
+p <- c(0.1, 0.5, 0.9)
+
+binom_pmf_df <- tibble(x = rep(1:n, length(p))) %>%
+  mutate(p = rep(p, each = n), pmf = dbinom(x, size = n, prob = p))
+
+ggplot(binom_pmf_df, aes(x = x, y = pmf, fill = factor(p))) +
+  geom_col(width = 0.25, position = "dodge") +
+  scale_x_continuous(breaks = 1:n) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  labs(x = "x", y = "Функція ймовірности", fill = "p",
+       title = str_c("Біномний розподіл для n = ", n)) +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+## Розподіл Пуассона
+
+- Випадкова величина $X$ має **розподіл Пуассона** (Poisson distribution)^[Симеон Дені Пуассон (Sim\'eon Denis Poisson, 1781--1840) --- французький математик] із параметром $\lambda > 0$, якщо її функція ймовірности має вид
+\begin{equation}
+p_X(k) = \frac{e^{-\lambda} \lambda^k}{k!} \cdot \bbmOne{k\in \NN \cup \set{0}}
+\label{eq:poissonpmf}
+\end{equation}
+
+- Це позначають через $X \sim \pois{\lambda}$
+
+- Розподіл Пуассона використовують для моделювання явищ, які стаються нечасто
+    + Кількість електронних листів, отримуваних за годину
+    + Кількість шматочків шоколаду в печиві
+    + Число землетрусів на рік у деякому регіоні планети
+    + Число типографських помилок на окремо взятій сторінці
+
+- Параметр $\lambda$ можна інтерпретувати як частоту появи деяких подій
+
+- Можна порахувати, що $\EE{X} = \Var{X} = \lambda$
+
+- Можна показати, що якщо $X_i \sim \pois{\lambda_i}$, $i = 1, \ldots, k$, і всі незалежні, то $\sum_{i=1}^k X_i \sim \pois{\sum_{i=1}^k \lambda_i}$
+
+## Розподіл Пуассона в R
+
+- У пакеті `stats` для розподілу Пуассона існує сім'я функцій `pois`
+
+- Наприклад, нехай число типографських помилок на окремо взятій сторінці книжки $X$ має розподіл Пуассона $\pois{0.5}$
+
+- Тобто в середньому 1 помилка на 2 сторінки
+
+- Тоді ймовірність того, що на сторінці буде 2 помилки, дорівнює $\ds \PPX{X = 2} = \frac{e^{-0.5} 0.5^2}{2!}$
+
+- В R це можна порахувати так
+```{r pois_typos, indent = "    "}
+dpois(2, lambda = 0.5)
+```
+
+- Чому дорівнює ймовірність **хоча б однієї** помилки на сторінці?
+
+- Відповідь дорівнює $\PPX{X \geq 1} = 1 - \PPX{X < 1} = 1 - \PPX{X = 0}$
+
+- Або
+```{r pois_typos_p, indent = "    "}
+1 - dpois(0, lambda = 0.5)
+1 - ppois(0, lambda = 0.5) # X <= 0 <=> X < 1
+ppois(0, lambda = 0.5, lower.tail = FALSE)
+```
+
+
+## Функції ймовірности розподілу Пуассона
+
+```{r pois_pmf, echo = FALSE, fig.align = "center", out.width = "100%"}
+n <- 15
+lambda <- c(2, 5, 10)
+pois_pmf_df <- tibble(x = rep(1:n, length(lambda))) %>%
+  mutate(lambda = rep(lambda, each = n), pmf = dpois(x, lambda = lambda))
+ggplot(pois_pmf_df, aes(x = x, y = pmf, fill = factor(lambda))) +
+  geom_col(width = 0.25, position = "dodge") +
+  scale_x_continuous(breaks = 1:n) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  labs(x = "x", y = "Функція ймовірности", fill = "\u03BB") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+
+## Зв'язок між розподілом Пуассона і біномним розподілом
+
+- Можна довести таке твердження
+
+- Нехай $X \sim \bin{n}{p}$, $n \to \infty$, $p_n \to 0$, але $np_n \to \lambda$
+
+- Тоді функція ймовірности $X$ прямує до функції ймовірности $Y \sim \pois{\lambda}$
+
+- Приклади застосування:
+    + Число осіб у громаді, які доживуть до 100 років
+    + Число неправильно набраних телефонних номерів на день
+    + Число пакетів собачого корму, проданих у деякому магазині за день
+    + Число клієнтів поштового відділку на день
+    + Число вакансій, що відкриваються за рік у судовій системі
+    + Число $\alpha$-частинок, випромінюваних протягом фіксованого періоду часу
+
+- Нехай $X=$\quotes{число відвідувачів вебсайту на день}
+
+- Щодня відвідати сайт незалежно одне від одного вирішує 100 користувачів, з імовірністю відвідання $p = 0.02$
+
+- Строго формально $X \sim \bin{100}{p}$
+
+- Проте наближено $X\sim \pois{100 \cdot 0.02} = \pois{2}$
+
+- Справді, ймовірності, що сайт відвідають щонайменше 3 користувачі, такі:
+```{r pois_binom, indent = "    "}
+pbinom(2, size = 10^2, prob = 2*10^{-2}, lower.tail = FALSE) # X >= 3 <=> X > 2
+ppois(2, lambda = 2, lower.tail = FALSE)
+```
+
+
+## Рівномірний розподіл
+
+- Розгляньмо тепер неперервні випадкові величини
+
+- Величина $X$ має **рівномірний розподіл** (uniform distribution) на проміжку $(a; b)$, якщо її щільність дорівнює
+\begin{equation}
+f_X(x) = \frac{1}{b - a} \cdot \bbmOne{x \in (a; b)}
+\label{eq:uniformpdf}
+\end{equation}
+
+- Це позначають через $X \sim \unif{(a; b)}$
+
+- Функція рівномірного розподілу має такий вид:
+\begin{equation}
+	F_X(x) = \int_{-\infty}^x \bbmOne{t \in (a; b]}\, dt = \begin{cases}
+		0\;, & x < a\\
+		\dfrac{x - a}{b - a}\;, & a \leq x < b\\
+		1\;, & x \geq b
+	\end{cases}
+	\label{eq:uniformcdf}
+\end{equation}
+
+- Можна показати, що якщо $U \sim \unif{(0; 1]}$, то $X = a + (b - a)U$
+
+- Можна порахувати, що $\EE{X} = \dfrac{a + b}{2}$, а $\Var{X} = \dfrac{(b - a)^2}{12}$
+
+## Рівномірний розподіл в R
+
+- У пакеті `stats` для розподілу Пуассона існує сім'я функцій `unif`
+
+- Наприклад, нехай між аеропортом та містом що 15 хвилин курсує шатл
+
+- Нехай час очікування шатла $X$ має рівномірний розподіл $X\sim \unif{(0; 15)}$
+
+- Чому дорівнює ймовірність, що пасажиру доведеться ждати шатл понад 6 хвилин?
+
+- Відповідь дорівнює $\ds \PPX{X \geq 6} = 1 - F_X(6) = 1 - \frac{6 - 0}{15 - 0}$
+
+- Або
+```{r unif_shuttle, indent = "    "}
+1 - punif(6, min = 0, max = 15)
+punif(6, min = 0, max = 15, lower.tail = FALSE)
+```
+
+
+## Щільності рівномірного розподілу
+
+```{r unif_pdf, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(aes(color = "red"), fun = dunif, args = list(min = -1.5, max = 0.5),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "blue"), fun = dunif, args = list(min = 0, max = 1),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "green"), fun = dunif, args = list(min = 2, max = 4),
+                n = 10001, alpha = 0.5) +
+  scale_x_continuous(limits = c(-2, 5), breaks = scales::breaks_width(1)) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  scale_color_identity(guide = "legend", labels = c("(-1; 1)", "(0; 1)", "(2; 4)")) +
+  labs(x = "x", y = "Щільність", color = "Носій") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+## Функції рівномірного розподілу
+
+```{r unif_cdf, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(aes(color = "red"), fun = punif, args = list(min = -1.5, max = 0.5),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "blue"), fun = punif, args = list(min = 0, max = 1),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "green"), fun = punif, args = list(min = 2, max = 4),
+                n = 10001, alpha = 0.5) +
+  scale_x_continuous(limits = c(-2, 5), breaks = scales::breaks_width(1)) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  scale_color_identity(guide = "legend", labels = c("(-1; 1)", "(0; 1)", "(2; 4)")) +
+  labs(x = "x", y = "Функція розподілу", color = "Носій") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+
+
+## Експоненційний розподіл
+
+- Величина $X$ має **експоненційний розподіл** (exponential distribution) із параметром $\lambda > 0$, якщо її щільність дорівнює
+\begin{equation}
+  f_X(x) = \lambda e^{-\lambda x} \cdot \bbmOne{x > 0}
+	\label{eq:exponentialpdf}
+\end{equation}
+
+- Це позначають через $X \sim \expo{\lambda}$
+
+- Функція експоненційного розподілу має такий вид:
+\begin{equation}
+	F_X(x) = \intARRdt{\lambda e^{-\lambda x} \cdot \bbmOne{x > 0}}{-\infty}{x} = \begin{cases}
+	0\;, & x < 0\\
+	1 - e^{-\lambda x}\;, & x \geq 0
+\end{cases}
+	\label{eq:exponentialcdf}
+\end{equation}
+
+- Інтерпретація $X$ --- **час очікування** настання нової події у потоці подій з інтенсивністю $\lambda$
+
+- Можна порахувати, що $\EE{X} = \frac{1}{\lambda}$, а  $\Var{X} = \frac{1}{\lambda^2}$
+
+- Експоненційний розподіл --- **єдиний неперервний**, який не має пам'яти:
+\[
+\PPX{X \geq s + t \mid X \geq s} = \PPX{X\geq t}\;, \quad s, t \geq 0
+\]
+
+
+## Експоненційний розподіл в R
+
+- У пакеті `stats` для розподілу Пуассона існує сім'я функцій `exp`
+
+- Наприклад, нехай 	тривалість $X$ телефонної розмови (у хвилинах) має експоненційний розподіл із параметром $\lambda = 0.1$
+
+- Тобто в послідовності телефонних дзвінків, де наступний починається відразу після завершення попереднього, завершення розмови стається (в середньому) 0.1 разів на хвилину, або 1 раз на 10 хвилин
+
+- Тоді ймовірність того, що щойно розпочата розмова протриває понад 10 хвилин, дорівнює
+\[
+\PPX{X > 10} = 1 - F(10) = 1 - (1 - e^{-0.1\cdot 10}) = e^{-1}
+\]
+
+- Або
+```{r expo_phone, indent = "    "}
+1 - pexp(10, rate = 0.1)
+pexp(10, rate = 0.1, lower.tail = FALSE)
+```
+
+- А ймовірність того, що тривалість буде від 10 до 20 хвилин, дорівнює
+\[
+\PPX{10 < X < 20} = F(20) - F(10) = e^{-1} - e^{-2}
+\]
+
+- Або
+```{r expo_phone2, indent = "    "}
+pexp(20, rate = 0.1) - pexp(10, rate = 0.1)
+```
+
+
+## Щільності експоненційного розподілу
+
+```{r expo_pdf, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(aes(color = "red"), fun = dexp, args = list(rate = 0.5),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "blue"), fun = dexp, args = list(rate = 1),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "green"), fun = dexp, args = list(rate = 2),
+                n = 10001, alpha = 0.5) +
+  scale_x_continuous(limits = c(0, 5), breaks = scales::breaks_width(1)) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  scale_color_identity(guide = "legend", labels = c("0.5", "1", "2")) +
+  labs(x = "x", y = "Щільність", color = "\u03BB") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+## Функції експоненційного розподілу
+
+```{r expo_cdf, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(aes(color = "red"), fun = pexp, args = list(rate = 0.5),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "blue"), fun = pexp, args = list(rate = 1),
+                n = 10001, alpha = 0.5) +
+  geom_function(aes(color = "green"), fun = pexp, args = list(rate = 2),
+                n = 10001, alpha = 0.5) +
+  scale_x_continuous(limits = c(0, 5), breaks = scales::breaks_width(1)) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  scale_color_identity(guide = "legend", labels = c("0.5", "1", "2")) +
+  labs(x = "x", y = "Щільність", color = "\u03BB") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+## Стандартний нормальний розподіл
+
+- Без перебільшення, **найбільш важливим розподілом у теорії ймовірностей та статистиці** є **нормальний розподіл** (normal distribution)
+
+- Випадкова величина $Z$ має **стандартний** (standard) нормальний розподіл, якщо її щільність розподілу має вид
+\begin{equation}
+	\phi(z) = \frac{1}{\sqrt{2\pi}} e^{-\frac{z^2}{2}}
+	\label{eq:standardnormalpdf}
+\end{equation}
+
+- Це позначають через $Z \sim N(0, 1)$
+
+- Корисні властивості $\phi$:
+    + Вона є парною функцією: $\phi(-z) = \phi(z)$
+    + $\phi^\prime(z) = - z \phi(z)$
+
+- Функція стандартного нормального розподілу, $\ds \Phi(z) = \intARRdt{\phi(t)}{-\infty}{z}$, **не має** аналітичного виразу
+    + Її рахують чисельно
+
+- Корисні властивості $\Phi$:
+    + $\Phi(z) = 1 - \Phi(-z)$
+    + $\Phi^{-1}(p) = -\Phi^{-1}(1 - p)$, $p\in(0; 1)$
+
+
+- Можна порахувати, що $\EE{X} = 0$, а $\Var{X} = 1$
+    + Звідси позначення $N(0, 1)$
+
+
+## Нормальний розподіл
+
+- Випадкова величина $X$ має **нормальний розподіл** (normal distribution) зі сподіванням $\mu$ та дисперсією $\sigma^2$ ($\sigma > 0$), якщо $X = \mu + \sigma Z$, де $Z \sim N(0, 1)$
+
+- Це позначають через $X\sim N(\mu, \sigma^2)$
+
+- Отже завжди можна перейти від $X$ до $Z$, віднявши $\mu$ і поділивши на $\sigma$
+    + Тоді сподівання буде 0, а дисперсія --- 1
+    + Це справедливо також для інших величин
+    + У цьому контексті $Z$ називають $Z$\textbf{-оцінкою} (Z-score)
+
+- Існує прямий зв'язок між щільностями й функціями розподілу $N(0, 1)$ і $N(\mu, \sigma^2)$:
+    + $\ds F(x) = \Phi\left(\frac{x - \mu}{\sigma}\right)$
+    + $\ds f(x) = \frac{1}{\sigma}\cdot \phi\left(\frac{x - \mu}{\sigma}\right) = \frac{1}{\sqrt{2\pi}\sigma} e^{-\frac{(x - \mu)^2}{2\sigma^2}}$
+
+- Можна показати, що $aX + b\sim N(a\mu + b, a^2\sigma^2)$
+
+- Можна порахувати, що $\EE{X} = \mu$, а $\Var{X} = \sigma^2$
+    + Звідси позначення $N(\mu, \sigma^2)$
+
+- Можна показати, що якщо $X_i \sim N(\mu_i, \sigma_i^2)$, $i = 1, \ldots, k$, і всі незалежні, то $\sum_{i=1}^k X_i \sim N\left(\sum_{i=1}^k \mu_i, \sum_{i=1}^k\sigma_i^2\right)$
+
+## Нормальний розподіл в R
+
+- У пакеті `stats` для нормального розподілу існує сім'я функцій `norm`
+
+- Наприклад, нехай розподіл IQ $X$ серед деякої групи осіб є нормальний зі сподіванням $\mu = 105$ та середньоквадратичним відхиленням $\sigma = 20$
+    + Тобто $X \sim N(105, 20^2)$
+
+- Тоді IQ щонайбільше 80 у частки осіб
+\[
+\PPX{X \leq 80} = \PPX{\frac{X - 105}{20} \leq \frac{80 - 105}{20}} = \Phi(-1.25)
+\]
+
+- Або
+```{r norm_IQ_leq, indent = "    "}
+pnorm(80, mean = 105, sd = 20)
+pnorm((80 - 105) / 20)
+```
+
+- А, наприклад, IQ лежить між 95 і 125 у частки осіб
+\[
+\mkern-30mu \PPX{95 \leq X \leq 125} = \PPX{\frac{95 - 105}{20} \leq \frac{X - 105}{20} \leq \frac{125 - 105}{20}}  = \Phi(1) - \Phi(-0.5)
+\]
+
+- Або
+```{r norm_IQ_between, indent = "    "}
+pnorm(125, mean = 105, sd = 20) - pnorm(95, mean = 105, sd = 20)
+pnorm((125 - 105) / 20) - pnorm((95 - 105) / 20)
+```
+
+
+
+## Щільності нормального розподілу
+
+```{r norm_pdf, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(aes(color = "red"), fun = dnorm, args = list(mean = 0, sd = 1),
+                alpha = 0.5) +
+  geom_function(aes(color = "blue"), fun = dnorm, args = list(mean = 0, sd = sqrt(2)),
+                alpha = 0.5) +
+  geom_function(aes(color = "green"), fun = dnorm, args = list(mean = 1, sd = 1),
+                alpha = 0.5) +
+  scale_x_continuous(limits = c(-4, 4), breaks = scales::breaks_width(1)) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  scale_color_identity(guide = "legend", labels = c("N(0, 1)", "N(0, 2)", "N(1, 1)"), breaks = c("red", "blue", "green")) +
+  labs(x = "x", y = "Щільність", color = "Параметри") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20),
+        legend.text.align = 0)
+```
+
+## Функції нормального розподілу
+
+```{r norm_cdf, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(aes(color = "red"), fun = pnorm, args = list(mean = 0, sd = 1),
+                alpha = 0.5) +
+  geom_function(aes(color = "blue"), fun = pnorm, args = list(mean = 0, sd = sqrt(2)),
+                alpha = 0.5) +
+  geom_function(aes(color = "green"), fun = pnorm, args = list(mean = 1, sd = 1),
+                alpha = 0.5) +
+  scale_x_continuous(limits = c(-4, 4), breaks = scales::breaks_width(1)) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  scale_color_identity(guide = "legend", labels = c("N(0, 1)", "N(0, 2)", "N(1, 1)"), breaks = c("red", "blue", "green")) +
+  labs(x = "x", y = "Функція розподілу", color = "Параметри") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20),
+        legend.text.align = 0)
+```
+
+## Правило трьох сигм (1)
+
+- Надзвичайно корисним на практиці є так зване **правильо трьох сигм** (the three sigma rule)
+
+- Наприклад, якщо $X\sim N(\mu, \sigma^2)$,
+\[
+\PPX{|X - \mu| \leq \sigma} =  \PPX{\left|\frac{X- \mu}{\sigma}\right| \leq 1} = \PPx{-1 \leq Z \leq 1}{Z}
+\]
+
+- Можна обчислити
+```{r norm_one_sigma, indent = "    "}
+pnorm(1) - pnorm(-1)
+```
+
+- Аналогічно для $\PPX{|X - \mu| \leq 2\sigma}$ і $\PPX{|X - \mu| \leq 3\sigma}$
+```{r norm_two_three_sigma, indent = "    "}
+pnorm(2) - pnorm(-2)
+pnorm(3) - pnorm(-3)
+```
+
+## Правило трьох сигм (2)
+
+```{r three_sigma, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(fun = dnorm) +
+  stat_function(fun = function(x) ifelse(abs(x) < 3, dnorm(x), 0), geom = "area", fill = "yellow", n = 10001, alpha = 0.3) +
+  stat_function(fun = function(x) ifelse(abs(x) < 2, dnorm(x), 0), geom = "area", fill = "green", n = 10001, alpha = 0.3) +
+  stat_function(fun = function(x) ifelse(abs(x) < 1, dnorm(x), 0), geom = "area", fill = "blue", n = 10001, alpha = 0.3) +
+  geom_text(aes(x = 0, y = dnorm(1) + 0.02), size = 4, fontface = "bold",
+            label = str_c(round((pnorm(1) - pnorm(-1)) * 100, 2), "%")) +
+  geom_text(aes(x = 0, y = dnorm(2) + 0.02), size = 4, fontface = "bold",
+            label = str_c(round((pnorm(2) - pnorm(-2)) * 100, 2), "%")) +
+  geom_text(aes(x = 0, y = dnorm(3) + 0.02), size = 4, fontface = "bold",
+            label = str_c(round((pnorm(3) - pnorm(-3)) * 100, 2), "%")) +
+  geom_segment(aes(x = -1, y = dnorm(-1), xend = 1, yend = dnorm(1)),
+                  arrow = arrow(length = unit(0.2, "cm"), ends = "both")) +
+  geom_segment(aes(x = -2, y = dnorm(-2), xend = 2, yend = dnorm(2)),
+                  arrow = arrow(length = unit(0.2, "cm"), ends = "both")) +
+  geom_segment(aes(x = -3, y = dnorm(-3), xend = 3, yend = dnorm(3)),
+                  arrow = arrow(length = unit(0.2, "cm"), ends = "both")) +
+  scale_x_continuous(limits = c(-4, 4), breaks = scales::breaks_width(1)) +
+  labs(x = "z", y = expression(phi(z))) +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+
+## Багатовимірний нормальний розподіл (1)
+
+- Випадковий вектор  $\bfX = (X_1, \ldots, X_k)^\top$ має **багатовимірний нормальний розподіл** (multivariate normal distribution), якщо
+	\[
+	\bfX = \bfA \cdot \bfZ + \vec{\mu}
+	\]
+    + $\Sigma = \bfA \bfA^\top$, вона є симетричною і додатно визначеною
+    + $\bfA \in \RR^k \times \RR^n$ --- матриця така, що $\Sigma$ невироджена
+    + $\bfZ = (Z_1, \ldots Z_n)^\top$, $Z_i \sim N(0, 1)$, усі $Z_i$ незалежні
+    + $\vec{\mu} = (\mu_1, \ldots, \mu_n)^\top \in \RR^n$
+
+- Це позначають через $\bfX\sim N(\vec{\mu}, \Sigma)$
+
+- **Альтернативне визначення**: $\bfX \sim N(\vec{\mu}, \Sigma)$ якщо будь-яка лінійна комбінація $Y = \bfc^\top \bfX$ його координат, $\bfc \in \RR^k$, має нормальний розподіл
+
+- Зверніть увагу: маржинальними розподілами для багатовимірного нормального є нормальні
+    + Але зворотне твердження **у загальному випадку** не виконується
+
+- Спільна щільність $\bfX$ дорівнює
+\begin{equation}
+	f_\bfX(x_1, \ldots, x_k) = \frac{1}{\sqrt{(2\pi)^{k} |\Sigma|}} e^{-\frac{1}{2} (\bfx - \vec{\mu})^\top \Sigma^{-1} (\bfx - \vec{\mu})}
+	\label{eq:multivariatenormalpdf}
+\end{equation}
+
+- Можна порахувати, що $\EE{\bfX} = \vec{\mu}$, $\Covm{\bfX} = \Sigma$
+
+## Багатовимірний нормальний розподіл (2)
+
+- Якщо $\bfX = (X_1, \ldots, X_k)^\top \sim N(\vec{\mu}, \Sigma)$, то $\bfXp = (X_{i_1}, \ldots, X_{i_m})^\top \sim N(\vec{\mu}^\prime, \Sigma^\prime)$, де
+\[
+    \vec{\mu}^\prime = \begin{pmatrix}
+    	\mu_{i_1}\\
+    	\mu_{i_2}\\
+    	\vdots\\
+    	\mu_{i_m}
+    \end{pmatrix}\;, \qquad \Sigma^\prime = \begin{pmatrix}
+    \Sigma_{i_1, i_1} & \Sigma_{i_1, i_2} & \ldots & \Sigma_{i_1, i_m}\\
+    \Sigma_{i_2, i_1} & \Sigma_{i_2, i_2} & \ldots & \Sigma_{i_2, i_m}\\
+    \vdots & \vdots & \ddots & \vdots\\
+    \Sigma_{i_m, i_1} & \Sigma_{i_m, i_2} & \ldots & \Sigma_{i_m, i_m}
+\end{pmatrix}
+	\]
+	
+- Наприклад, нехай $(X_1, X_2, X_3)^\top \sim N\left((\mu_1, \mu_2, \mu_3)^\top, \Sigma\right)$
+    + Тоді, скажімо, $(X_1, X_3)^\top \sim N\left((\mu_1, \mu_3)^\top, \begin{pmatrix} \Sigma_{11} & \Sigma_{13}\\ \Sigma_{31} & \Sigma_{33} \end{pmatrix}\right)$
+
+- Також для багатовимірного нормального розподілу справедлива **унікальна** властивість
+
+- Нехай $\bfX \sim N(\vec{\mu}, \Sigma)$ можна подати як конкатенацію  $\bfX = \left(\bfX_1^\top, \bfX_2^\top\right)^\top$
+
+- Тоді якщо кореляція між будь-якою координатою $\bfX_1$ і будь-якою координатою $\bfX_2$ нульова, то $\bfX_1 \ind \bfX_2$
+
+## Розподіл $\chi^2$
+
+- На основі нормального можна утворити інші розподіли, винятково важливі в статистиці
+
+- $Z \sim N(0, 1)$, а $X = Z^2$
+
+- Тоді $X$ має **розподіл $\chi^2$ з одним ступенем свободи**
+
+- Функцію розподілу дуже просто визначити:
+\begin{align*}
+F_X(x) &= \PPx{Z^2 \leq x}{Z} = (\Phi(\sqrt{x}) - \Phi(-\sqrt{x})) \cdot \bbmOne{x \geq 0} \\
+&= \left(2\Phi(\sqrt{x}) - 1\right) \cdot \bbmOne{x \geq 0}
+\end{align*}
+
+\vspace{-0.2cm}
+- Звідси $\ds f_X(x) = \left((2\Phi(\sqrt{x}) - 1)\cdot \bbmOne{x \geq 0}\right)^\prime = 2\phi(\sqrt{x}) \cdot \frac{1}{2\sqrt{x}}\cdot \bbmOne{x > 0}$
+
+- У загальному випадку, сума  $X = \sum_{i=1}^r Z_i^2$, $Z_i \sim N(0, 1)$, $i = 1, \ldots, r$, де всі величини незалежні, має **розподіл $\chi^2$ з $r$ ступенями свободи**
+
+- Це позначають через $X \sim \chi^2_r$
+
+- Її щільність дорівнює^[Що можна легко вивести з властивостей Гамма-розподілу (КЛТЙ 10.2)]
+\begin{equation}
+  f_{X}(x) = \frac{1}{2^{\frac{r}{2}}\Gamma\left(\frac{r}{2}\right)} x^{\frac{r}{2} - 1} e^{-\frac{x}{2}} \cdot \bbmOne{x > 0}
+  \label{eq:chi2r}
+\end{equation}
+
+- Можна порахувати, що $\EE{\chi_r^2} = r$, $\Var{\chi_r^2} = 2r$
+
+- У пакеті `stats` для розподілу $\chi^2$ існує сім'я функцій `chisq`
+
+## Розподіл $t$ (1)
+- На основі розподілу $\chi^2$ можна сформулювати ще два важливі розподіли, які нам знадобляться
+
+- Випадкова величина $T = \frac{Z}{\sqrt{Y / r}}$, де $Z\sim N(0, 1)$, $Y \sim \chi_r^2$, має **$t$-розподіл з $r$ ступенями свободи** (він же розподіл Ст'юдента, Student's $t$-distribution)
+
+- Це позначають через $T \sim t_r$
+
+- Можна показати, що якщо $r = 1$, то $T$ має розподіл Коші
+
+- Щільність розподілу $t_r$ дорівнює
+\begin{equation}
+  f(t) = \frac{\Gamma\left(\frac{r + 1}{2}\right)}{\sqrt{r\pi} \Gamma\left(\frac{r}{2}\right)} \left(1 + \frac{t^2}{r}\right)^{-\frac{r + 1}{2}}
+  \label{eq:t}
+\end{equation}
+
+- У пакеті `stats` для $t$-розподілу існує сім'я функцій `t`
+
+- Розподіл $t$ прямує до стандартного нормального розподілу, коли $r\to\infty$, і до того ж дуже швидко
+
+## Розподіл $t$ (2)
+
+```{r t_normal, echo = FALSE, fig.align = "center", out.width = "100%"}
+ggplot() +
+  geom_function(aes(color = "red"), fun = dt, args = list(df = 1)) +
+  geom_function(aes(color = "blue"), fun = dt, args = list(df = 2)) +
+  geom_function(aes(color = "green"), fun = dt, args = list(df = 10)) +
+  geom_function(aes(color = "cyan"), fun = dt, args = list(df = 30)) +
+  geom_function(aes(color = "magenta"), fun = dt, args = list(df = 100)) +
+  geom_function(aes(color = "black"), fun = dnorm, linetype = "dashed") +
+  scale_x_continuous(limits = c(-4, 4), breaks = scales::breaks_width(1)) +
+  scale_y_continuous(breaks = scales::breaks_extended(n = 5)) +
+  scale_color_identity(guide = "legend", breaks = c("red", "blue", "green", "cyan", "magenta", "black"), labels = c("1", "2", "10", "30", "100", "Infinity")) +
+  labs(x = "x", y = "Щільність", color = "r") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 30),
+        axis.title = element_text(size = 25),
+        axis.text = element_text(size = 20),
+        legend.title = element_text(size = 25),
+        legend.text = element_text(size = 20))
+```
+
+## Розподіл $F$
+
+- Випадкова величина $F = \frac{X/r_1}{Y/r_2}$, де $X \sim \chi^2_{r_1}$, $Y \sim \chi^2_{r_2}$, має **$F$-розподіл з $r_1$ і $r_2$ ступенями свободи** (він же розподіл Фішера-Снедекора,  Fisher–Snedecor distribution)
+
+- Це позначають через $F \sim F_{r_1, r_2}$
+
+- Щільність розподілу $F_{r_1, r_2}$ дорівнює
+\begin{equation}
+  F(x) = \frac{1}{B\left(\frac{r_1}{2}, \frac{r_2}{2}\right)} \left(\frac{r_1}{r_2}\right)^{r_1/2} x^{\frac{r_1}{2} - 1} \left(1 + \frac{r_1}{r_2}x\right)^{-\frac{r_1 + r_2}{2}}
+  \label{eq:F}
+\end{equation}
+
+- У пакеті `stats` для $F$-розподілу існує сім'я функцій `f`
